@@ -1,4 +1,4 @@
-﻿---
+---
 name: sight-handoff
 description: End-of-session handoff for the Sight project. Trigger when the user says "/sight-handoff", "/handoff", "handoff", "wrap up", "push and handoff", "session done", or similar, or proactively when the context is heavy (30+ tool calls, long conversation, a significant phase just completed). This skill updates docs/sight-handoff.md in the canonical terse schema (phase, last commit, current task, next action, blockers, <=5 notes), commits and pushes to trzz333/sight on GitHub so GPT can see it, and outputs two separate bootstrap messages (one for Claude, one for GPT) each in its own copy/paste markdown code block. Use this instead of ad-hoc handoff writing whenever a Sight session is being wrapped. Trigger proactively when context is heavy, do not wait to be asked.
 ---
@@ -75,7 +75,10 @@ $msg = @"
 
 <optional 1-3 sentence body; what shipped and why. No bullet lists.>
 "@
-$msg | Out-File -FilePath COMMIT_MSG.txt -Encoding utf8
+# Do NOT use Out-File -Encoding utf8 on Windows PowerShell 5.1: it writes a BOM
+# which ends up as an invisible character at the start of the commit subject.
+# Use WriteAllText (no BOM) or PowerShell 7's utf8NoBOM encoding.
+[System.IO.File]::WriteAllText("$(Get-Location)\COMMIT_MSG.txt", $msg)
 git commit -F COMMIT_MSG.txt
 Remove-Item COMMIT_MSG.txt
 git push origin main
