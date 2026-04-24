@@ -4,20 +4,20 @@ Canonical handoff document. Updated at the end of every session by whoever execu
 
 ---
 
-**Phase:** P2 in progress (in-Godot agent loop live; Godot verification and Python agent layer pending)
+**Phase:** P2 in progress (Godot verify pending; Python agent layer scaffold queued)
 
-**Last commit:** 9d0054a skills: sight-handoff description passes skill-packager validator
+**Last commit:** fde2a2f skills: sight-handoff bootstrap templates use subtext pattern
 
-**Current task:** Signal Dodge Godot harness built with an autonomous in-Godot rule agent pipeline (capture -> perceive -> decide -> controller -> logger), driven entirely by `Main._physics_process`. Everything committed and pushed to `trzz333/sight`. The `/sight-handoff` skill is iterated and packaged as a `.skill` file for Claude Desktop upload.
+**Current task:** Session confirmed Godot 4.3+ still not installed on StrongerJr (`winget list GodotEngine.GodotEngine` returned no match). No live NDJSON captured. Per one-phase-per-prompt rule, the Python agent layer was not scaffolded this round; GPT's scaffold spec (TCP loopback IPC on 127.0.0.1, `src/sight_agent/{capture,perception,policy,controller,logger,evaluator}`, reconciler joining `python.decision.seq` to `godot.controller_cmd_applied.seq`) is queued as a separate prompt.
 
-**Next action:** Jeff does two things in parallel. (1) Install Godot 4.3+ on StrongerJr (`winget install GodotEngine.GodotEngine` is shortest) and run `godot --path C:\Projects\Sight\games\signal-dodge` to verify the harness emits real NDJSON to `%APPDATA%\Godot\app_userdata\Signal Dodge\runs\`. (2) Upload `sight-handoff.skill` through Claude Desktop Settings so `/sight-handoff` triggers reliably in future sessions.
+**Next action:** Jeff installs Godot 4.3+ on StrongerJr via `winget install GodotEngine.GodotEngine`, runs `godot --path C:\Projects\Sight\games\signal-dodge` to capture first live NDJSON under `%APPDATA%\Godot\app_userdata\Signal Dodge\runs\`, then pastes GPT's queued Python scaffold prompt into a fresh Desktop Claude session.
 
-**Blockers:** Godot 4.3+ not installed on StrongerJr. Live verification blocked until installed. Not blocking forward planning; GPT can size the Python agent layer in parallel.
+**Blockers:** Godot 4.3+ not installed on StrongerJr. Live verification cannot proceed until Jeff runs the winget install.
 
 **Notes:**
 
-- Primary host: STRONGERJR (i7-10750H 6C/12T, 64 GB RAM, RTX 2060 4 GB).
-- After Godot verify, GPT sizes the Python agent layer (screenshot capture, OpenCV perception, same rule policy for baseline parity with the in-Godot agent).
-- `Last commit` convention: references the HEAD just before the handoff commit. The handoff commit itself is implicit (the reader is already viewing its output).
-- Chunking rule active. One phase per Desktop Claude prompt.
-- Ethics armor intact. Custom Godot micro-game, Jeff-owned, no live commercial surface.
+- Primary host STRONGERJR (i7-10750H 6C/12T, 64 GB RAM, RTX 2060 4 GB).
+- GPT scaffold locked: TCP loopback (port 8765 unless repo claims otherwise), JSON-line protocol, deps mss + numpy + opencv-python + pytest, fake providers so unit tests pass without Godot.
+- Evaluator reconciler uses frame as canonical simulation coordinate; timestamps for latency diagnostics only.
+- Do not tune Signal Dodge constants before first live NDJSON. Adjustment order after first run: spawn interval, hazard speed, sprite sizes last.
+- Ethics armor intact; custom Godot micro-game, Jeff-owned, no live commercial surface.
