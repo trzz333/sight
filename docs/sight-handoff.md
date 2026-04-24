@@ -6,18 +6,20 @@ Canonical handoff document. Updated at the end of every session by whoever execu
 
 **Phase:** P1 (days 1-14, scaffold + game selection)
 
-**Last commit:** 0aea7b8 (handoff: P1 scaffold complete)
+**Last commit:** pending (handoff: Sight moves to StrongerJr)
 
-**Current task:** Repo scaffolded. Ethics armor in place. Machine role TBD pending ILDC audit.
+**Current task:** Repo transfer ILDC -> StrongerJr complete. Awaiting Godot micro-game selection from GPT.
 
-**Next action:** GPT proposes Godot micro-game concepts (Jeff is not a Godot domain expert, does not pick unprompted). Sight target machine is the 64GB gaming laptop, not this one. ILDC likely takes Council role; formal reassignment after kaizen audit.
+**Next action:** GPT proposes 3 Godot micro-game concepts matched to StrongerJr specs. Jeff picks one. Then P2 agent-loop scaffolding begins.
 
-**Blockers:** none (audit in flight on ILDC; separate workstream)
+**Blockers:** none
 
 **Notes:**
 
-- Charter at `docs/sight-charter.md` is the source of truth for scope, non-goals, and phase gates
-- Ethics armor is complete: README non-goals up front, `docs/ethics.md` verbatim, [CONTRIBUTING.md](http://CONTRIBUTING.md) hard rejections, MIT LICENSE (copyright "Jeff")
-- Remote: GitHub `trzz333/sight`, public, main branch
-- GPT owns planning/research; Claude owns execution, revision, commit, handoff; Grok only on triggers per charter; Jeff decides direction (not technical detail guessing)
-- Chunking rule: one phase per Desktop Claude prompt going forward (no continue button, tool-call budget deaths are silent)
+- Primary host: **STRONGERJR** (i7-10750H 6C/12T, 64 GB RAM, RTX 2060 4 GB). Moved from ILDC on 2026-04-24 for the dGPU and RAM.
+- ILDC (DESKTOP-QIPEQM0) is now primary for Council. Sight folder on ILDC can be removed after this push lands.
+- Convention: first session on a new primary host updates this handoff with `Primary host: <hostname>` and commits. Non-primary sessions are read-only.
+- Charter at `docs/sight-charter.md` is the source of truth for scope, non-goals, and phase gates.
+- Ethics armor: README non-goals up front, `docs/ethics.md` verbatim, CONTRIBUTING.md hard rejections, MIT LICENSE (copyright Jeff).
+- Remote: GitHub `trzz333/sight`, public, main. GPT plans; Claude executes and commits; Grok on trigger only; Jeff decides direction.
+- Chunking rule: one phase per Desktop Claude prompt (no continue button, tool-call budget deaths are silent).
