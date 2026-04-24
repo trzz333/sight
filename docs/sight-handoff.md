@@ -4,22 +4,22 @@ Canonical handoff document. Updated at the end of every session by whoever execu
 
 ---
 
-**Phase:** P2 in progress (agent loop scaffold)
+**Phase:** P2 in progress (in-Godot agent loop live; Python layer deferred)
 
-**Last commit:** pending (Signal Dodge minimal build landed)
+**Last commit:** pending (agent loop wired)
 
-**Current task:** Signal Dodge Godot 4 project scaffolded at `games/signal-dodge/`. Builds the harness only. No agent integration yet.
+**Current task:** Signal Dodge now runs an autonomous in-Godot rule agent. Pipeline: capture -> perceive -> decide -> move_action, driven by `Main._physics_process`. Player input from keyboard removed. `seed(42)` locks hazard spawn sequence. Logger schema expanded with `agent_tick` events.
 
-**Next action:** Jeff opens `games/signal-dodge/project.godot` in Godot 4.3+ and runs F5 to verify. Expected: player square bottom-center, red squares fall from top every 0.5s, collision quits the process, NDJSON written to `%APPDATA%\Godot\app_userdata\Signal Dodge\runs\`. Commit any UIDs Godot regenerates on first save. Then GPT defines the agent-side P2 scaffold (capture, perception, policy, controller, logger reader) in `src/`.
+**Next action:** Jeff installs Godot 4.3+ on StrongerJr and runs `godot --path games/signal-dodge` (or F5 in editor). Confirm the run quits on collision and an NDJSON lands in `%APPDATA%\Godot\app_userdata\Signal Dodge\runs\`. Commit the regenerated scene UIDs Godot writes on first save. Then GPT sizes the Python agent layer (capture via screenshot, perception via OpenCV, same rule policy for baseline parity).
 
-**Blockers:** none. Godot 4.3+ must be installed on StrongerJr to verify. If the first-run reveals any scene-format rejection (UID, ext_resource path), Claude revises.
+**Blockers:** Godot not installed on StrongerJr. Cannot run headless verification this session. All code is static-reviewed; first live run is Jeff's verification step. `winget install GodotEngine.GodotEngine` or scoop is the shortest path.
 
 **Notes:**
 
 - Primary host: **STRONGERJR** (i7-10750H 6C/12T, 64 GB RAM, RTX 2060 4 GB).
-- Renderer set to `gl_compatibility` so RTX 2060 and any integrated GPU both work out of box.
-- All movement and spawning in `_physics_process` for determinism across machines (per spec).
-- Logger is an autoload. Writes to `user://runs/run_<ts>.ndjson`. One event per line. Schema documented in `games/signal-dodge/README.md`.
-- `player_tick` logs at 60 Hz by spec. ~1800 lines per 30 s run. Evaluator will downsample in P3.
-- Chunking rule: one phase per Desktop Claude prompt (no continue button, tool-call budget deaths are silent).
-- Ethics armor intact: custom micro-game, Jeff-owned, no live-service surface area.
+- Agent pipeline is pure-ish: `capture(player, hazards) -> state`, `perceive(state) -> threat-or-none`, `decide(threat, player_x, screen_w) -> {-1,0,+1}`. Easy to port to Python, easy to unit test.
+- Rule policy is intentionally weak (nearest-aligned dodge, no look-ahead). Expected survival under random dense spawn: a few seconds. This is a wiring proof, not a good agent.
+- `Main._physics_process` is the single authoritative tick driver. Player and Hazard expose methods; Main calls them. No per-child _physics_process competing for order.
+- Python agent layer (capture via mss, perception via OpenCV) is the next P2 sub-phase, after Godot-side verification.
+- Chunking rule: one phase per Desktop Claude prompt.
+- Ethics armor intact.

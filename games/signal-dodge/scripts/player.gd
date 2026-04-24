@@ -1,6 +1,6 @@
 ﻿extends Area2D
 
-# Player - Area2D. Moves left/right, clamps to screen. Emits died() on hazard contact.
+# Player - Area2D. Agent-driven movement via move_action(). Emits died() on hazard contact.
 
 signal died(survival_time: float, hazard_pos: Vector2, player_pos: Vector2)
 
@@ -17,15 +17,11 @@ func _ready() -> void:
 	area_entered.connect(_on_area_entered)
 	queue_redraw()
 
-func _physics_process(delta: float) -> void:
-	var dir := 0.0
-	if Input.is_key_pressed(KEY_LEFT) or Input.is_key_pressed(KEY_A):
-		dir -= 1.0
-	if Input.is_key_pressed(KEY_RIGHT) or Input.is_key_pressed(KEY_D):
-		dir += 1.0
+# Agent-driven. action: -1 left, 0 stay, +1 right. Called by Main each physics tick.
+func move_action(action: int, delta: float) -> void:
+	var dir := clamp(float(action), -1.0, 1.0)
 	position.x += dir * SPEED * delta
 	position.x = clamp(position.x, SIZE / 2.0, SCREEN_WIDTH - SIZE / 2.0)
-	Logger.log_event("player_tick", {"x": position.x, "y": position.y})
 
 func _draw() -> void:
 	draw_rect(Rect2(-SIZE / 2.0, -SIZE / 2.0, SIZE, SIZE), Color.WHITE)

@@ -7,13 +7,16 @@
 var _file: FileAccess = null
 var _run_start_ms: int = 0
 
-func start_run() -> void:
+func start_run(meta: Dictionary = {}) -> void:
 	DirAccess.make_dir_recursive_absolute("user://runs")
 	var ts := Time.get_datetime_string_from_system().replace(":", "-")
 	var path := "user://runs/run_%s.ndjson" % ts
 	_file = FileAccess.open(path, FileAccess.WRITE)
 	_run_start_ms = Time.get_ticks_msec()
-	log_event("run_start", {"path": ProjectSettings.globalize_path(path)})
+	var evt := {"path": ProjectSettings.globalize_path(path)}
+	for k in meta.keys():
+		evt[k] = meta[k]
+	log_event("run_start", evt)
 
 func log_event(event_type: String, data: Dictionary) -> void:
 	if _file == null:
