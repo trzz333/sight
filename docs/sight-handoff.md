@@ -6,7 +6,7 @@ Canonical handoff document. Updated at the end of every session by whoever execu
 
 **Phase:** P1 (days 1-14, scaffold + game selection)
 
-**Last commit:** pending initial commit
+**Last commit:** 42ee811 (scaffold: charter, ethics armor, repo structure)
 
 **Current task:** Repo scaffolded. Ethics armor in place. Awaiting Godot micro-game selection.
 
