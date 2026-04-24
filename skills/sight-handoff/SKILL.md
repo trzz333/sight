@@ -110,55 +110,67 @@ Non-negotiable. Every invocation produces TWO separate markdown fenced code bloc
 
 Each block is standalone and copy-pasteable. Each is labeled OUTSIDE the block with a plain heading like `**Claude bootstrap**` or `**GPT bootstrap**`, not inside. No preamble inside blocks. No em dashes anywhere. No combining. No substituting one for the other.
 
+### Shared structure (both messages)
+
+Both bootstraps follow the same shape:
+
+1. One-line session frame ("Sight execution round for Claude on <host>." / "Sight planning round for GPT.").
+2. Numbered `Next steps for you to ...` block leading the message. Concrete, prioritized, tied to current state. Not a menu.
+3. `Handoff subtext:` block at the bottom with state, latest commit, phase, role split, and operating reminders.
+
+Reason: the next model that reads this message needs the WHAT-TO-DO in its first scan. Handoff detail is orienting background, not the headline.
+
 ### 3a. Claude bootstrap template
 
-Fill in the placeholders. ~14-22 lines.
+Fill in the placeholders. ~22-32 lines. Plain fenced block, no language hint.
 
 ```
-Sight session resume on <hostname>. Orient and stop.
-1. cd C:\Projects\Sight
-2. Read docs\sight-charter.md and docs\sight-handoff.md end to end.
-3. git log --oneline -5; git status (confirm clean, HEAD = <short hash> or newer, remote in sync)
-4. Report back:
-   - Current phase
-   - Last commit hash and one-line summary
-   - Current task
-   - Next action
-   - Anything in blockers that needs Jeff's attention
-<one line: Do NOT start new work plus any current-phase guardrails. Replace with a specific queued execution task only if one is explicitly ready.>
+Sight execution round for Claude on <hostname>.
 
-Operating reminders for this project:
-- Terse, tool-first output. No narration of routine operations. No em dashes. Minimal colons.
-- Windows paths, absolute.
-- GPT leads planning; Claude executes, revises, commits, handoffs; Grok on trigger; Jeff decides direction.
-- Ethics are hard constraints per docs\ethics.md. No live commercial games, no bot-detection evasion, no Freecash, no account farming, no cheat-pipeline assets. Flag and stop if a request drifts.
-- One phase per prompt. Desktop Claude has no continue button; tool-call budget deaths are silent. Chunk accordingly.
-- Commit + push at end of any substantive session. Update docs\sight-handoff.md. No "A or B, Jeff picks."
-End with "No Jeff action required" unless genuinely blocked.
+Next steps for you to execute when Jeff kicks this session:
+
+1. Orient first. cd C:\Projects\Sight. Read docs\sight-charter.md and docs\sight-handoff.md end to end. Run git log --oneline -5 and git status. Confirm HEAD is <short hash> or newer and origin/main is in sync. Report phase, last commit, current task, next action, anything in blockers that needs Jeff.
+
+2. <Specific execution task for this session, derived from Next action in the handoff. Be concrete about commands, paths, and the verification criterion. If the task is conditional on something Jeff needs to do first, say so.>
+
+3. <Fallback path if the step-2 precondition is not met. Usually: do NOT scaffold ahead of phase, surface the blocker to Jeff, and stop.>
+
+4. <Optional: handling for parallel work from GPT or other prompts. Reinforce the one-phase-per-prompt chunking rule if relevant.>
+
+5. End of session: run /sight-handoff. Produce both bootstrap messages (Claude and GPT), every time, subtext style.
+
+Handoff subtext:
+- State: <one-to-two-sentence state summary>
+- Latest commit: <short hash> <subject>
+- Phase: <phase id + descriptor>
+- Role split: GPT plans; Claude executes, revises, commits, handoffs; Grok on charter-defined triggers; Jeff decides direction.
+- Operating reminders: terse, tool-first output, no narration of routine operations, no em dashes, minimal colons, Windows absolute paths, one phase per prompt, ethics hard constraints per docs\ethics.md, flag and stop if a request drifts.
+- End every response with "No Jeff action required" unless genuinely blocked.
 ```
-
-Use a plain fenced block. No language hint like `text` on the fence.
 
 ### 3b. GPT bootstrap template
 
-Fill in the placeholders. ~10-14 lines. No implementation instructions. GPT plans and researches.
+Fill in the placeholders. ~18-26 lines. Plain fenced block. No implementation instructions. GPT plans and researches.
 
 ```
-Sight session update for GPT.
+Sight planning round for GPT.
 
-Read these first in the trzz333/sight GitHub repo:
-- docs/sight-charter.md
-- docs/sight-handoff.md
-<any other doc directly relevant to the open decision, e.g. docs/signal-dodge-spec.md>
+Next steps for you to work through before Jeff kicks the next execution round:
 
-State: <one-sentence state summary>
-Latest commit: <short hash> <subject>
-Phase: <phase id + descriptor>
+1. <First planning or architecture question. One short paragraph. Name tradeoffs, ask for a pick.>
 
-Open question for you to think through before the next execution round:
-<the architecture, sequencing, or parameter-choice question that is Jeff's decision but where GPT's framing helps. One paragraph max.>
+2. <Second. Typically evaluator, metrics, or data-schema design.>
 
-Role split stands: you plan and research, Claude executes, Grok is pulled only for charter-defined triggers, Jeff decides direction.
+3. <Third. Typically module boundaries, file layout, or scaffold sequencing.>
+
+4. <Fourth, optional. Post-run parameter review or sequencing decisions that depend on the next live run.>
+
+Handoff subtext:
+- Read docs/sight-charter.md and docs/sight-handoff.md in the trzz333/sight GitHub repo.
+- State: <one-sentence state summary>
+- Latest commit: <short hash> <subject>
+- Phase: <phase id + descriptor>
+- Role split stands: you plan and research, Claude executes, Grok on charter-defined triggers, Jeff decides direction.
 ```
 
 ### 3c. Purpose
