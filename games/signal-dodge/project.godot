@@ -1,0 +1,27 @@
+﻿; Signal Dodge - Godot 4 project
+; Minimal test harness for Sight agent loop. Not a product.
+
+config_version=5
+
+[application]
+
+config/name="Signal Dodge"
+run/main_scene="res://scenes/main.tscn"
+config/features=PackedStringArray("4.3", "GL Compatibility")
+
+[autoload]
+
+Logger="*res://scripts/logger.gd"
+
+[display]
+
+window/size/viewport_width=720
+window/size/viewport_height=540
+
+[physics]
+
+common/physics_ticks_per_second=60
+
+[rendering]
+
+renderer/rendering_method="gl_compatibility"

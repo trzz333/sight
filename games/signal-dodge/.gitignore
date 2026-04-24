@@ -1,0 +1,12 @@
+﻿# Godot 4 cache and import data
+.godot/
+.import/
+
+# Export artifacts
+*.exe
+*.pck
+*.zip
+
+# Local run logs (if copied back from user://)
+runs/
+*.ndjson
