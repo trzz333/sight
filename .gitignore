@@ -1,0 +1,86 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Distribution / packaging
+.Python
+build/
+dist/
+*.egg-info/
+*.egg
+pip-wheel-metadata/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Testing / coverage
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.mypy_cache/
+.ruff_cache/
+.hypothesis/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Godot
+.import/
+.godot/
+*.import
+*.translation
+export.cfg
+export_presets.cfg
+*.pck
+*.zip
+.mono/
+mono_crash.*.json
+
+# Build artifacts
+*.exe
+*.dll
+*.pdb
+
+# OS cruft
+.DS_Store
+Thumbs.db
+desktop.ini
+ehthumbs.db
+$RECYCLE.BIN/
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Sight-specific
+runs/
+*.log
+*.ndjson
+captures/
+models/
+*.onnx
+*.gguf
+*.safetensors
+
+# Secrets / local config
+.env
+.env.*
+!.env.example
+secrets/
+credentials/
+
+# Scratch
+scratch/
+tmp/
+scaffold.ps1
