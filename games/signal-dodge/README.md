@@ -117,3 +117,22 @@ Sample (hand-written to emitter format; first real run on Godot-equipped host wi
 - Hazards that exit offscreen without collision are not logged. Add `hazard_exit` in P3 if needed.
 - Python agent layer (capture via screenshot + OpenCV perception) is deferred. This in-Godot agent is the determinism and wiring proof.
 - UIDs omitted from .tscn files. Godot regenerates on first editor open; commit the resulting diff.
+
+
+## TCP controller mode (optional, P2 Python layer)
+
+The default loop runs the in-Godot rule agent. To drive the player from an external Python
+agent instead, launch Godot with `SIGHT_TCP_MODE=1`:
+
+```powershell
+$env:SIGHT_TCP_MODE = "1"
+# optional: $env:SIGHT_TCP_PORT = "8765"
+godot --path C:\Projects\Sight\games\signal-dodge
+```
+
+In TCP mode `scripts/tcp_controller.gd` listens on `127.0.0.1:8765`. The Python client (see
+`src/sight_agent/controller/tcp_client.py`) sends a `hello` and then one `action` per
+decision. Godot holds the previous action if no new command arrived that frame, and emits a
+`controller_cmd_applied` event with `seq`, `frame`, `action`, `move_x` for reconciler join.
+
+Loopback only. No external network surface.
