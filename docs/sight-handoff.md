@@ -1,25 +1,25 @@
 # Sight handoff
 
-Updated: 2026-04-25 16:54 -05:00
+Updated: 2026-04-25 17:12 -05:00
 
 ## Phase
-P2. Phase B part A complete. Live verification pending.
+P2. Phase B TCP live verify complete.
 
 ## Last commit
-Pending. P2: add Phase B TCP client runner.
+Pending. handoff: Phase B TCP live verify.
 
 ## Current task
-Phase B runner built and unit-tested. Live verify pending.
+Phase B TCP live verify complete.
 
 ## Next action
-Phase B part B live verify. Launch Godot TCP server, then run the Python client against 127.0.0.1:8765 and inspect both NDJSON streams.
+Decide P2 closeout vs P3 measurement gate prep.
 
 ## Blockers
 None.
 
 ## Notes
-- Python exe. C:\Users\maste\AppData\Local\Python\pythoncore-3.14-64\python.exe
-- Run tests. C:\Users\maste\AppData\Local\Python\pythoncore-3.14-64\python.exe -m pytest
-- Runner. scripts\run_phase_b.py is TCP client only, no perception. Stdlib only.
-- Wire. hello first, then paced action NDJSON. Godot is the server on 127.0.0.1:8765.
-- Stub policy is deterministic on seq mod 30. Replace before any real-environment work.
+- Godot NDJSON. C:\Users\maste\AppData\Roaming\Godot\app_userdata\Signal Dodge\runs\run_2026-04-25T17-12-17.ndjson
+- Python NDJSON. C:\Projects\Sight\runs\phase_b_python_20260425T171218.ndjson
+- Godot events. run_start=1, player_tick=384, spawn=12, controller_connected=1, controller_hello=1, controller_cmd_applied=89, controller_disconnect=1
+- Python events. decision=90
+- Evaluator. run_id_mismatch=False, duplicate_applied_seq_count=0, joined_count=89
