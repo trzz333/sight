@@ -134,6 +134,12 @@ def test_evaluate_computes_core_metrics():
     assert metrics["decision_latency_p50_ms"] == 2.5
     assert metrics["decision_latency_p95_ms"] == 2.5
 
+    # New contract: run_id surfaced from both sides + duplicate counter clean.
+    assert metrics["godot_run_id"] == "run_eval_test"
+    assert metrics["python_run_id"] == "run_eval_test"
+    assert metrics["run_id_mismatch"] is False
+    assert metrics["duplicate_applied_seq_count"] == 0
+
 
 def test_evaluate_accepts_legacy_agent_tick():
     """Current in-Godot harness emits `agent_tick`. Evaluator must accept it too."""
@@ -159,3 +165,126 @@ def test_evaluate_accepts_legacy_agent_tick():
     metrics = evaluate(events)
     assert metrics["survival_frames"] == 59
     assert metrics["hazards_spawned"] == 1
+
+
+# --- new instrumentation tests -----------------------------------------------
+
+
+def test_reconcile_first_applied_frame_wins_on_duplicate_seq():
+    """Defensive: even if two controller_cmd_applied events share a seq (legacy log,
+    pre-patch tcp_controller behavior, or future regression), reconcile picks the FIRST
+    applied frame and surfaces the duplicate count."""
+
+    run_id = "run_dup_seq"
+    godot_events = [
+        {"run_id": run_id, "type": "run_start", "seed": constants.RANDOM_SEED},
+        # First applied frame for seq=1.
+        {
+            "run_id": run_id,
+            "type": "controller_cmd_applied",
+            "seq": 1,
+            "frame": 30,
+            "action": "left",
+            "move_x": -1,
+        },
+        # Duplicate held-action emission on a later frame. Must NOT win the join.
+        {
+            "run_id": run_id,
+            "type": "controller_cmd_applied",
+            "seq": 1,
+            "frame": 31,
+            "action": "left",
+            "move_x": -1,
+        },
+        # Another duplicate, even later.
+        {
+            "run_id": run_id,
+            "type": "controller_cmd_applied",
+            "seq": 1,
+            "frame": 32,
+            "action": "left",
+            "move_x": -1,
+        },
+    ]
+    python_events = [
+        {
+            "run_id": run_id,
+            "type": "decision",
+            "seq": 1,
+            "capture_ts_unix_ns": 1_000_000_000,
+            "decision_ts_unix_ns": 1_001_000_000,
+            "action": "left",
+            "move_x": -1,
+        }
+    ]
+
+    join = reconcile(godot_events, python_events)
+    assert len(join["joined"]) == 1
+    assert join["joined"][0]["frame"] == 30  # FIRST applied frame, not the latest
+    assert join["duplicate_applied_seq_count"] == 2
+
+    metrics = evaluate(godot_events, python_events)
+    assert metrics["duplicate_applied_seq_count"] == 2
+    assert metrics["joined_count"] == 1
+
+
+def test_run_id_mismatch_flag():
+    """When both sides report run_id and they differ, evaluator flags it. No silent join."""
+
+    godot_events = [
+        {"run_id": "godot-run-A", "type": "run_start", "seed": constants.RANDOM_SEED},
+        {
+            "run_id": "godot-run-A",
+            "type": "controller_cmd_applied",
+            "seq": 1,
+            "frame": 10,
+            "action": "stay",
+            "move_x": 0,
+        },
+    ]
+    python_events = [
+        {
+            "run_id": "python-run-B",
+            "type": "decision",
+            "seq": 1,
+            "capture_ts_unix_ns": 0,
+            "decision_ts_unix_ns": 0,
+            "action": "stay",
+            "move_x": 0,
+        }
+    ]
+    metrics = evaluate(godot_events, python_events)
+    assert metrics["godot_run_id"] == "godot-run-A"
+    assert metrics["python_run_id"] == "python-run-B"
+    assert metrics["run_id_mismatch"] is True
+
+
+def test_run_id_missing_returns_none_mismatch():
+    """Legacy log: Godot side carries no run_id. Mismatch flag is None, not False, so
+    downstream tooling can distinguish 'cannot tell' from 'verified equal'."""
+
+    godot_events = [
+        {"type": "run_start", "seed": constants.RANDOM_SEED},
+        {
+            "type": "controller_cmd_applied",
+            "seq": 1,
+            "frame": 10,
+            "action": "stay",
+            "move_x": 0,
+        },
+    ]
+    python_events = [
+        {
+            "run_id": "python-only",
+            "type": "decision",
+            "seq": 1,
+            "capture_ts_unix_ns": 0,
+            "decision_ts_unix_ns": 0,
+            "action": "stay",
+            "move_x": 0,
+        }
+    ]
+    metrics = evaluate(godot_events, python_events)
+    assert metrics["godot_run_id"] is None
+    assert metrics["python_run_id"] == "python-only"
+    assert metrics["run_id_mismatch"] is None

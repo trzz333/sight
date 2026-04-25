@@ -10,6 +10,13 @@ extends Node
 #
 # Godot never sends game state back. Frame/apply acknowledgments are reserved for reconciliation,
 # not perception. See docs/sight-charter.md ethics armor.
+#
+# Apply semantics:
+#   - poll() returns the latest move_x every frame; held action carries across frames.
+#   - log_applied() emits controller_cmd_applied at most ONCE per new seq (first-applied frame).
+#     The reconciler is also defensive against duplicates, but the source of truth is here.
+#   - run_id captured from hello is stamped onto every controller_* event after the hello so
+#     the evaluator can detect Python/Godot run_id mismatches without legacy log changes.
 
 const DEFAULT_HOST := "127.0.0.1"
 const DEFAULT_PORT := 8765
@@ -23,6 +30,11 @@ var _last_action := "stay"
 var _last_move_x := 0
 var _last_seq := 0
 var _last_ts_unix_ns := 0
+# First-applied-frame guard. log_applied() compares _last_seq against _last_logged_seq.
+var _last_logged_seq := 0
+
+# run_id captured from hello; stamped onto every controller_* event afterwards.
+var _run_id := ""
 
 var _connected_once := false
 var _disconnected_logged := false
@@ -33,6 +45,9 @@ var _port := DEFAULT_PORT
 
 func is_active() -> bool:
 	return _active
+
+func run_id() -> String:
+	return _run_id
 
 # Call once from Main._ready if SIGHT_TCP_MODE is enabled.
 func start(host: String = DEFAULT_HOST, port: int = DEFAULT_PORT) -> Error:
@@ -55,7 +70,7 @@ func stop() -> void:
 
 # Called every physics tick by Main BEFORE player movement. Returns the action to apply as int
 # in {-1, 0, +1}. Holds previous action if no new command arrived.
-func poll(frame: int) -> int:
+func poll(_frame: int) -> int:
 	if not _active:
 		return _last_move_x
 
@@ -64,7 +79,7 @@ func poll(frame: int) -> int:
 		_peer = _server.take_connection()
 		_connected_once = true
 		_disconnected_logged = false
-		Logger.log_event("controller_connected", {"host": _host, "port": _port})
+		Logger.log_event("controller_connected", _decorate({"host": _host, "port": _port}))
 
 	if _peer == null:
 		return _last_move_x
@@ -74,7 +89,7 @@ func poll(frame: int) -> int:
 	var status := _peer.get_status()
 	if status != StreamPeerTCP.STATUS_CONNECTED:
 		if _connected_once and not _disconnected_logged:
-			Logger.log_event("controller_disconnect", {"status": status})
+			Logger.log_event("controller_disconnect", _decorate({"status": status}))
 			_disconnected_logged = true
 			# Stay neutral on disconnect.
 			_last_action = "stay"
@@ -105,15 +120,17 @@ func poll(frame: int) -> int:
 func _handle_line(line: String) -> void:
 	var parse := JSON.parse_string(line)
 	if typeof(parse) != TYPE_DICTIONARY:
-		Logger.log_event("controller_bad_line", {"line": line})
+		Logger.log_event("controller_bad_line", _decorate({"line": line}))
 		return
 	var msg: Dictionary = parse
 	var mtype := str(msg.get("type", ""))
 	if mtype == "hello":
 		_hello = msg.duplicate()
+		_run_id = str(msg.get("run_id", ""))
+		# controller_hello stamps run_id explicitly even if _decorate would omit empty string.
 		Logger.log_event("controller_hello", {
 			"protocol": msg.get("protocol"),
-			"run_id": msg.get("run_id"),
+			"run_id": _run_id,
 			"agent": msg.get("agent"),
 		})
 		return
@@ -127,19 +144,30 @@ func _handle_line(line: String) -> void:
 		_last_seq = seq
 		_last_ts_unix_ns = ts
 		return
-	Logger.log_event("controller_unknown_type", {"type": mtype})
+	Logger.log_event("controller_unknown_type", _decorate({"type": mtype}))
 
 # Main calls this after move_action to log that the command was applied on this frame.
+# First-applied-frame semantics: at most one controller_cmd_applied per new seq.
 func log_applied(frame: int) -> void:
 	if _last_seq <= 0:
 		return
-	Logger.log_event("controller_cmd_applied", {
+	if _last_seq == _last_logged_seq:
+		return  # already logged this seq on its first applied frame; held action carries silently
+	_last_logged_seq = _last_seq
+	Logger.log_event("controller_cmd_applied", _decorate({
 		"seq": _last_seq,
 		"frame": frame,
 		"action": _last_action,
 		"move_x": _last_move_x,
 		"ts_unix_ns": _last_ts_unix_ns,
-	})
+	}))
 
 func latest_move_x() -> int:
 	return _last_move_x
+
+# Inject run_id into outbound Logger events when known. Empty run_id is omitted so legacy
+# evaluator behavior on logs that pre-date the hello stays unchanged.
+func _decorate(data: Dictionary) -> Dictionary:
+	if _run_id != "" and not data.has("run_id"):
+		data["run_id"] = _run_id
+	return data

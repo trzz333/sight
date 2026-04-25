@@ -48,20 +48,35 @@ def load_ndjson(path: str | Path) -> list[dict]:
 def reconcile(godot_events: list[dict], python_events: list[dict]) -> dict:
     """Join python.decision.seq to godot.controller_cmd_applied.seq.
 
+    First-applied-frame semantics. tcp_controller.gd is now patched to log
+    controller_cmd_applied only on the first frame a new seq is observed, but the
+    reconciler defends the contract anyway: if duplicate seqs slip in from a legacy
+    log or a future regression, the FIRST applied event wins and the count of
+    duplicates is surfaced as `duplicate_applied_seq_count`.
+
     Returns a dict with:
         joined: list of {seq, frame, python_decision, godot_applied}
         unmatched_python: list of python decision events with no applied match
         unmatched_godot:  list of godot controller_cmd_applied events with no decision match
+        duplicate_applied_seq_count: number of EXTRA controller_cmd_applied events
+            beyond the first per seq. 0 on a clean run.
     """
 
-    py_decisions: dict[int, dict] = {
-        e["seq"]: e for e in python_events if e.get("type") == "decision" and "seq" in e
-    }
-    applied: dict[int, dict] = {
-        e["seq"]: e
-        for e in godot_events
-        if e.get("type") == "controller_cmd_applied" and "seq" in e
-    }
+    py_decisions: dict[int, dict] = {}
+    for e in python_events:
+        if e.get("type") == "decision" and "seq" in e and e["seq"] not in py_decisions:
+            py_decisions[e["seq"]] = e  # first-decision-wins, mirrors applied semantics
+
+    applied: dict[int, dict] = {}
+    duplicate_applied_seq_count = 0
+    for e in godot_events:
+        if e.get("type") != "controller_cmd_applied" or "seq" not in e:
+            continue
+        seq = e["seq"]
+        if seq in applied:
+            duplicate_applied_seq_count += 1
+            continue  # keep the first-applied event; ignore the duplicate
+        applied[seq] = e
 
     joined: list[dict] = []
     for seq in sorted(set(py_decisions) & set(applied)):
@@ -82,7 +97,21 @@ def reconcile(godot_events: list[dict], python_events: list[dict]) -> dict:
         "joined": joined,
         "unmatched_python": unmatched_python,
         "unmatched_godot": unmatched_godot,
+        "duplicate_applied_seq_count": duplicate_applied_seq_count,
     }
+
+
+def _first_run_id(events: list[dict]) -> str | None:
+    """Return the first non-empty run_id seen on any event, else None.
+
+    Tolerates legacy logs that omit run_id entirely.
+    """
+
+    for e in events:
+        rid = e.get("run_id")
+        if rid:
+            return str(rid)
+    return None
 
 
 # --- metrics ------------------------------------------------------------------
@@ -203,8 +232,18 @@ def evaluate(godot_events: list[dict], python_events: list[dict] | None = None) 
 
     join = reconcile(godot_events, python_events)
 
+    godot_run_id = _first_run_id(godot_events)
+    python_run_id = _first_run_id(python_events)
+    if godot_run_id is not None and python_run_id is not None:
+        run_id_mismatch: bool | None = godot_run_id != python_run_id
+    else:
+        run_id_mismatch = None  # at least one side legacy-silent on run_id
+
     return {
         "run_id": run_start.get("run_id") if run_start else None,
+        "godot_run_id": godot_run_id,
+        "python_run_id": python_run_id,
+        "run_id_mismatch": run_id_mismatch,
         "seed": run_start.get("seed") if run_start else None,
         "survival_frames": survival_frames,
         "survival_seconds": survival_seconds,
@@ -220,4 +259,5 @@ def evaluate(godot_events: list[dict], python_events: list[dict] | None = None) 
         "joined_count": len(join["joined"]),
         "unmatched_python_count": len(join["unmatched_python"]),
         "unmatched_godot_count": len(join["unmatched_godot"]),
+        "duplicate_applied_seq_count": join["duplicate_applied_seq_count"],
     }
