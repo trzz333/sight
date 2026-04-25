@@ -4,20 +4,20 @@ Canonical handoff document. Updated at the end of every session by whoever execu
 
 ---
 
-**Phase:** P2 complete pending Grok sanity check
+**Phase:** P2 complete pending Phase B seq=0 sentinel patch
 
-**Last commit:** cb3080c handoff: P2 live verify complete
+**Last commit:**
 
-**Current task:** P2 minimal agent loop verified end to end. Capture, perception, policy, controller, logger, and evaluator all exercise on a live Godot loopback round with run_id parity and zero duplicate applied_seq.
+**Current task:** Phase B post-mortem on the lone unmatched_python decision. Raw NDJSON inspection plus tcp_controller.gd review identifies the orphan as a deterministic seq=0 sentinel collision, not a shutdown-tail artifact. No evaluator or wire-protocol code was written this session.
 
-**Next action:** Grok sanity check before crossing to P3 measurement layer. Then run the 300-action confirmation pass and codify a tail-tolerance threshold in the evaluator.
+**Next action:** Patch games\\signal-dodge\\scripts\\tcp_controller.gd to use \_last_seq := -1 with `if _last_seq < 0: return` guard in log_applied. Re-run the 90-action verify, expect unmatched_python_count=0. Then run the 300-action confirmation pass.
 
-**Blockers:** Grok phase-gate sanity check.
+**Blockers:** Jeff approval to apply patch B (Godot sentinel fix) and to relay the corrected diagnosis to GPT. Decide whether Grok needs a second sanity pass against raw data.
 
 **Notes:**
 
-- Phase B part A built/pushed at ff64de1. Phase B part B live verified/pushed at a6e512d.
-- Godot NDJSON. C:\Users\maste\AppData\Roaming\Godot\app_userdata\Signal Dodge\runs\run_2026-04-25T17-12-17.ndjson
-- Python NDJSON. C:\Projects\Sight\runs\phase_b_python_20260425T171218.ndjson
-- Evaluator. godot_run_id=phase-b-20260425T171218, python_run_id=phase-b-20260425T171218, run_id_mismatch=false, duplicate_applied_seq_count=0, joined_count=89, unmatched_python_count=1 (shutdown-tail artifact), unmatched_godot_count=0.
-- pytest 45 passed, 1 deselected. Tail unmatched=1 is structural at Godot quit, tolerance threshold to be codified before P3.
+- tcp_controller.gd line 30 inits `var _last_seq := 0` and line 143 guards `if _last_seq <= 0: return`. Python's first action carries seq=0, collides with the sentinel, never logs controller_cmd_applied for that seq. seq=1..89 pass the guard and apply normally.
+- Live run evidence. Python decisions span 0..89 (90 events). Godot applied span 1..89 (89 events). Last seqs match on both sides at ts_unix_ns 1777155141221667584. No contiguous-suffix orphan.
+- GPT shutdown-tail diagnosis is wrong on this run. Grok GREEN endorsed the prompt framing without raw NDJSON review. Patch B keeps the wire contract one-way and unchanged.
+- Tolerance code in src\\sight_agent\\evaluator\\reconcile.py may be unnecessary once the sentinel is fixed. Defer until evidence of an actual artifact appears in instrumented runs.
+- Working tree had pre-existing cosmetic double-backslash drift in this file. Resolved by this rewrite.
