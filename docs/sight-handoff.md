@@ -6,7 +6,7 @@ Canonical handoff document. Updated at the end of every session by whoever execu
 
 **Phase:** P2 in progress (phase (a) verified; phase (b) blocked on missing Python entrypoint, sequencing inverted from prior plan)
 
-**Last commit:** PLACEHOLDER refresh handoff hash
+**Last commit:** 1233677 handoff: phase (b) architecture inversion, runner spec pending
 
 **Current task:** Stage 1 recovery resolved the Python interpreter and pytest gate. Stage 2 architecture audit found that GPT's "Python harness binds 127.0.0.1:8765 first" is inverted. Godot is the TCP server (`games\signal-dodge\scripts\tcp_controller.gd`), Python is the client (`src\sight_agent\controller\tcp_client.py`, docstring `Binds nowhere`). No Python file in the repo has a `__main__` block, so there is no runnable Python entrypoint that can drive a live phase (b) run today. Phase (b) is not failed, it is unbuilt on the Python side.
 
