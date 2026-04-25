@@ -4,20 +4,20 @@ Canonical handoff document. Updated at the end of every session by whoever execu
 
 ---
 
-**Phase:** P2 in progress (Godot verify pending; Python agent layer scaffold queued)
+**Phase:** P2 in progress (Python agent layer scaffolded; Godot live verify still pending)
 
-**Last commit:** fde2a2f skills: sight-handoff bootstrap templates use subtext pattern
+**Last commit:** 542b09d P2: Python agent layer scaffold + Godot TCP controller mode
 
-**Current task:** Session confirmed Godot 4.3+ still not installed on StrongerJr (`winget list GodotEngine.GodotEngine` returned no match). No live NDJSON captured. Per one-phase-per-prompt rule, the Python agent layer was not scaffolded this round; GPT's scaffold spec (TCP loopback IPC on 127.0.0.1, `src/sight_agent/{capture,perception,policy,controller,logger,evaluator}`, reconciler joining `python.decision.seq` to `godot.controller_cmd_applied.seq`) is queued as a separate prompt.
+**Current task:** GPT's locked spec for the external Python agent layer is implemented under `src/sight_agent/{capture,perception,policy,controller,logger,evaluator}` with a TCP loopback IPC contract on `127.0.0.1:8765`. `games/signal-dodge/scripts/tcp_controller.gd` is added; `main.gd` opt-ins via `SIGHT_TCP_MODE=1` env var, default loop unchanged. `pytest` runs 33/33 green without Godot installed; live MSS smoke is gated behind `pytest -m live_mss`.
 
-**Next action:** Jeff installs Godot 4.3+ on StrongerJr via `winget install GodotEngine.GodotEngine`, runs `godot --path C:\Projects\Sight\games\signal-dodge` to capture first live NDJSON under `%APPDATA%\Godot\app_userdata\Signal Dodge\runs\`, then pastes GPT's queued Python scaffold prompt into a fresh Desktop Claude session.
+**Next action:** Jeff installs Godot 4.3+ on StrongerJr (`winget install GodotEngine.GodotEngine`), runs `godot --path C:\Projects\Sight\games\signal-dodge` once to capture first in-Godot NDJSON under `%APPDATA%\Godot\app_userdata\Signal Dodge\runs\`, then launches the same project with `$env:SIGHT_TCP_MODE = "1"` to verify the TCP path end-to-end against a Python client.
 
-**Blockers:** Godot 4.3+ not installed on StrongerJr. Live verification cannot proceed until Jeff runs the winget install.
+**Blockers:** Godot 4.3+ still not installed on StrongerJr. Live verification, determinism check, and first-pass difficulty assessment all gated on this.
 
 **Notes:**
 
-- Primary host STRONGERJR (i7-10750H 6C/12T, 64 GB RAM, RTX 2060 4 GB).
-- GPT scaffold locked: TCP loopback (port 8765 unless repo claims otherwise), JSON-line protocol, deps mss + numpy + opencv-python + pytest, fake providers so unit tests pass without Godot.
-- Evaluator reconciler uses frame as canonical simulation coordinate; timestamps for latency diagnostics only.
-- Do not tune Signal Dodge constants before first live NDJSON. Adjustment order after first run: spawn interval, hazard speed, sprite sizes last.
-- Ethics armor intact; custom Godot micro-game, Jeff-owned, no live commercial surface.
+- Godot logger schema is `{t, type, ...}` and lacks `run_id`; reconciler joins on `seq` so this is fine for now, but unifying `run_id` and `run_dir` across both sides is queued for the next slice.
+- Reconciler accepts both `player_tick` (TCP-mode) and `agent_tick` (legacy in-Godot) so the existing harness keeps working.
+- Determinism convention: in-Godot loop targets exact `survival_frames` under `seed=42`; Python visual loop targets exact `survival_frames` first, jitter is reportable but not a tuning trigger.
+- Do not change Signal Dodge constants before first live NDJSON. Adjustment order if needed: spawn interval, hazard speed, sprite sizes last.
+- Ethics armor intact. Loopback bind only, no external network surface; charter ethics rules unchanged.
