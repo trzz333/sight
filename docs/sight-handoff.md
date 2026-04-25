@@ -6,7 +6,7 @@ Canonical handoff document. Updated at the end of every session by whoever execu
 
 **Phase:** P2 complete pending Grok sanity check
 
-**Last commit:** a6e512d handoff: Phase B TCP live verify
+**Last commit:** cb3080c handoff: P2 live verify complete
 
 **Current task:** P2 minimal agent loop verified end to end. Capture, perception, policy, controller, logger, and evaluator all exercise on a live Godot loopback round with run_id parity and zero duplicate applied_seq.
 
