@@ -6,7 +6,7 @@ Canonical handoff document. Updated at the end of every session by whoever execu
 
 **Phase:** P2 in progress (phase (a) verified; phase (b) attempted, no TCP evidence captured, unverified)
 
-**Last commit:** dd194fc P2: Godot 4.6 compat and default verify
+**Last commit:** 37c6f85 handoff: phase (b) recovery audit, unverified
 
 **Current task:** Phase (b) live TCP verify was attempted in a prior session that crashed mid-flight. Recovery audit on 2026-04-25 at 11:25 local found repo clean at dd194fc, no Godot or Python processes running, port 8765 idle, and four Godot user-data logs between 08:36:18 and 08:46:59 containing only the engine banner (72 bytes) or 0 bytes. No NDJSON was produced from those launches. The 07:45 phase (a) NDJSON remains the only end-to-end logger evidence on disk. Phase (b) is unverified, not failed.
 
