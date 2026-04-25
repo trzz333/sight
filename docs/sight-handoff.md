@@ -4,20 +4,20 @@ Canonical handoff document. Updated at the end of every session by whoever execu
 
 ---
 
-**Phase:** P2 in progress (phase (a) verified; phase (b) attempted, no TCP evidence captured, unverified)
+**Phase:** P2 in progress (phase (a) verified; phase (b) blocked on missing Python entrypoint, sequencing inverted from prior plan)
 
-**Last commit:** 37c6f85 handoff: phase (b) recovery audit, unverified
+**Last commit:** PLACEHOLDER refresh handoff hash
 
-**Current task:** Phase (b) live TCP verify was attempted in a prior session that crashed mid-flight. Recovery audit on 2026-04-25 at 11:25 local found repo clean at dd194fc, no Godot or Python processes running, port 8765 idle, and four Godot user-data logs between 08:36:18 and 08:46:59 containing only the engine banner (72 bytes) or 0 bytes. No NDJSON was produced from those launches. The 07:45 phase (a) NDJSON remains the only end-to-end logger evidence on disk. Phase (b) is unverified, not failed.
+**Current task:** Stage 1 recovery resolved the Python interpreter and pytest gate. Stage 2 architecture audit found that GPT's "Python harness binds 127.0.0.1:8765 first" is inverted. Godot is the TCP server (`games\signal-dodge\scripts\tcp_controller.gd`), Python is the client (`src\sight_agent\controller\tcp_client.py`, docstring `Binds nowhere`). No Python file in the repo has a `__main__` block, so there is no runnable Python entrypoint that can drive a live phase (b) run today. Phase (b) is not failed, it is unbuilt on the Python side.
 
-**Next action:** Re-run phase (b) with listener-first sequencing. Start the Python harness on 127.0.0.1:8765 and confirm bind, then launch Godot from absolute exe path with SIGHT_TCP_MODE=1. Capture controller_connected, controller_hello, and at least one agent_tick over TCP. Resolve `.venv` first if pytest gating is required before the commit.
+**Next action:** GPT to specify the phase (b) Python runner shape before any Godot launch. Two design questions: (1) what is the intended phase (b) lived flow, connection probe only (`controller_hello` + N `agent_tick` from a stub policy) or end-to-end (perception -> policy -> tcp action -> logger), and (2) where the runner lives, `src\sight_agent\__main__.py` vs `scripts\run_phase_b.py`. Once specified, Claude builds the runner, then launches Godot first to bind 8765, confirms LISTEN, then runs the Python client and captures NDJSON.
 
-**Blockers:** none.
+**Blockers:** Phase (b) runner shape and location need GPT spec. Listed in Next action.
 
 **Notes:**
 
-- Recovery state at 2026-04-25 11:25 local: repo clean at dd194fc, working tree empty, no Godot or Python processes, port 8765 idle, nothing in flight to recover.
-- Four Godot launches in `C:\Users\maste\AppData\Roaming\Godot\app_userdata\Signal Dodge\logs` between 08:36 and 08:46 produced engine banner only or 0 bytes. No TCP traffic, no NDJSON, no scene parse errors in those four logs. Pattern fits aborted CLI smoke launches, not a code regression.
-- Phase (a) evidence intact: `run_2026-04-25T07-45-15.ndjson`, 689 events. Counts: run_start 1, agent_tick 663, spawn 22, collision 1, death 1, run_end 1.
-- Python interpreter not resolved on this host. `.venv\Scripts\python.exe` and `venv\Scripts\python.exe` both absent; system `python.exe` is the WindowsApps stub. Either point at the canonical interpreter or create `.venv` before the next pytest gate.
-- Heavy `start_process` volume correlates with phantom cmd or conhost windows on Windows Terminal during long Claude sessions. Prefer one persistent shell plus batched PS1 scripts. Reusable recovery script at `C:\Users\maste\AppData\Local\Temp\sight_recovery.ps1`.
+- Architecture inversion confirmed by code. `tcp_client.py` docstring states `Binds nowhere. Connects to 127.0.0.1:8765`. `tcp_controller.gd` (5779 bytes) is the Godot-side listener. Correct sequencing is Godot first as server, Python second as client. Tests already prove the wire schema via `_FakeTcpServer` in `tests\test_controller.py`.
+- No `__main__` blocks anywhere in the repo (whole-tree grep, probe at `C:\Users\maste\AppData\Local\Temp\sight_harness_probe.txt`). No `console_scripts` entry in `pyproject.toml`. The only Python execution path today is pytest.
+- Pytest gate resolved without `.venv`. `py -3 -m pytest` from `C:\Projects\Sight` passes 36 of 37 (1 deselected, `live_mss`). Python 3.14.4 at `C:\Users\maste\AppData\Local\Python\pythoncore-3.14-64\python.exe`. The package is installed editable into that user-site. The prior handoff note about needing `.venv` is stale and superseded.
+- Bare `python` and `python3` are not on PATH in spawned shells; use `py -3` everywhere. WindowsApps stub for `python.exe` is still present and should be avoided.
+- Reusable artifacts in `C:\Users\maste\AppData\Local\Temp`: `sight_harness_probe.ps1`, `sight_harness_probe.txt`, `sight_phase_b.ps1`. Keep until phase (b) runner lands.
