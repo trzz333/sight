@@ -1,23 +1,25 @@
-# Sight - Session Handoff
+# Sight handoff
 
-Canonical handoff document. Updated at the end of every session by whoever executed. Target cold-start resume time: 10 minutes.
+Updated: 2026-04-25 16:54 -05:00
 
----
+## Phase
+P2. Phase B part A complete. Live verification pending.
 
-**Phase:** P2 in progress (phase (a) verified; phase (b) blocked on missing Python entrypoint, sequencing inverted from prior plan)
+## Last commit
+Pending. P2: add Phase B TCP client runner.
 
-**Last commit:** 9bfeac6 chore: handoff note on dc spawn path stripping
+## Current task
+Phase B runner built and unit-tested. Live verify pending.
 
-**Current task:** Stage 1 recovery resolved the Python interpreter and pytest gate. Stage 2 architecture audit found that GPT's "Python harness binds 127.0.0.1:8765 first" is inverted. Godot is the TCP server (`games\signal-dodge\scripts\tcp_controller.gd`), Python is the client (`src\sight_agent\controller\tcp_client.py`, docstring `Binds nowhere`). No Python file in the repo has a `__main__` block, so there is no runnable Python entrypoint that can drive a live phase (b) run today. Phase (b) is not failed, it is unbuilt on the Python side.
+## Next action
+Phase B part B live verify. Launch Godot TCP server, then run the Python client against 127.0.0.1:8765 and inspect both NDJSON streams.
 
-**Next action:** GPT to specify the phase (b) Python runner shape before any Godot launch. Two design questions: (1) what is the intended phase (b) lived flow, connection probe only (`controller_hello` + N `agent_tick` from a stub policy) or end-to-end (perception -&gt; policy -&gt; tcp action -&gt; logger), and (2) where the runner lives, `src\sight_agent\__main__.py` vs `scripts\run_phase_b.py`. Once specified, Claude builds the runner, then launches Godot first to bind 8765, confirms LISTEN, then runs the Python client and captures NDJSON.
+## Blockers
+None.
 
-**Blockers:** Phase (b) runner shape and location need GPT spec. Listed in Next action.
-
-**Notes:**
-
-- Architecture inversion confirmed by code. `tcp_client.py` docstring states `Binds nowhere. Connects to 127.0.0.1:8765`. `tcp_controller.gd` (5779 bytes) is the Godot-side listener. Correct sequencing is Godot first as server, Python second as client. Tests already prove the wire schema via `_FakeTcpServer` in `tests\test_controller.py`.
-- No `__main__` blocks anywhere in the repo (whole-tree grep, probe at `C:\Users\maste\AppData\Local\Temp\sight_harness_probe.txt`). No `console_scripts` entry in `pyproject.toml`. The only Python execution path today is pytest.
-- Pytest gate resolved without `.venv`. `py -3 -m pytest` from `C:\Projects\Sight` passes 36 of 37 (1 deselected, `live_mss`). Python 3.14.4 at `C:\Users\maste\AppData\Local\Python\pythoncore-3.14-64\python.exe`. The package is installed editable into that user-site. The prior handoff note about needing `.venv` is stale and superseded.
-- DC `start_process` invoking `powershell -NoProfile -File <script>` strips PATH harder than expected. Even after registry PATH reload (`[Environment]::GetEnvironmentVariable('Path','Machine'/'User')`, len 954), `py.exe` is not resolvable. Prefer interactive REPL via `start_process("py -3 -i") + interact_with_process`, or hardcode `C:\Users\maste\AppData\Local\Python\pythoncore-3.14-64\python.exe`. WindowsApps `python.exe` stub still present, avoid.
-- Reusable artifacts in `C:\Users\maste\AppData\Local\Temp`: `sight_harness_probe.ps1`, `sight_harness_probe.txt`, `sight_phase_b.ps1`. Keep until phase (b) runner lands.
+## Notes
+- Python exe. C:\Users\maste\AppData\Local\Python\pythoncore-3.14-64\python.exe
+- Run tests. C:\Users\maste\AppData\Local\Python\pythoncore-3.14-64\python.exe -m pytest
+- Runner. scripts\run_phase_b.py is TCP client only, no perception. Stdlib only.
+- Wire. hello first, then paced action NDJSON. Godot is the server on 127.0.0.1:8765.
+- Stub policy is deterministic on seq mod 30. Replace before any real-environment work.
