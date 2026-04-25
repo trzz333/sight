@@ -79,7 +79,7 @@ func poll(_frame: int) -> int:
 		_peer = _server.take_connection()
 		_connected_once = true
 		_disconnected_logged = false
-		Logger.log_event("controller_connected", _decorate({"host": _host, "port": _port}))
+		SightLog.log_event("controller_connected", _decorate({"host": _host, "port": _port}))
 
 	if _peer == null:
 		return _last_move_x
@@ -89,7 +89,7 @@ func poll(_frame: int) -> int:
 	var status := _peer.get_status()
 	if status != StreamPeerTCP.STATUS_CONNECTED:
 		if _connected_once and not _disconnected_logged:
-			Logger.log_event("controller_disconnect", _decorate({"status": status}))
+			SightLog.log_event("controller_disconnect", _decorate({"status": status}))
 			_disconnected_logged = true
 			# Stay neutral on disconnect.
 			_last_action = "stay"
@@ -118,9 +118,9 @@ func poll(_frame: int) -> int:
 	return _last_move_x
 
 func _handle_line(line: String) -> void:
-	var parse := JSON.parse_string(line)
+	var parse: Variant = JSON.parse_string(line)
 	if typeof(parse) != TYPE_DICTIONARY:
-		Logger.log_event("controller_bad_line", _decorate({"line": line}))
+		SightLog.log_event("controller_bad_line", _decorate({"line": line}))
 		return
 	var msg: Dictionary = parse
 	var mtype := str(msg.get("type", ""))
@@ -128,7 +128,7 @@ func _handle_line(line: String) -> void:
 		_hello = msg.duplicate()
 		_run_id = str(msg.get("run_id", ""))
 		# controller_hello stamps run_id explicitly even if _decorate would omit empty string.
-		Logger.log_event("controller_hello", {
+		SightLog.log_event("controller_hello", {
 			"protocol": msg.get("protocol"),
 			"run_id": _run_id,
 			"agent": msg.get("agent"),
@@ -144,7 +144,7 @@ func _handle_line(line: String) -> void:
 		_last_seq = seq
 		_last_ts_unix_ns = ts
 		return
-	Logger.log_event("controller_unknown_type", _decorate({"type": mtype}))
+	SightLog.log_event("controller_unknown_type", _decorate({"type": mtype}))
 
 # Main calls this after move_action to log that the command was applied on this frame.
 # First-applied-frame semantics: at most one controller_cmd_applied per new seq.
@@ -154,7 +154,7 @@ func log_applied(frame: int) -> void:
 	if _last_seq == _last_logged_seq:
 		return  # already logged this seq on its first applied frame; held action carries silently
 	_last_logged_seq = _last_seq
-	Logger.log_event("controller_cmd_applied", _decorate({
+	SightLog.log_event("controller_cmd_applied", _decorate({
 		"seq": _last_seq,
 		"frame": frame,
 		"action": _last_action,

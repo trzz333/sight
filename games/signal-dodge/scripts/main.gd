@@ -33,7 +33,7 @@ func _ready() -> void:
 	_run_start_ms = Time.get_ticks_msec()
 	_tcp_mode = OS.get_environment("SIGHT_TCP_MODE") == "1"
 	var mode := "tcp" if _tcp_mode else "in_godot"
-	Logger.start_run({
+	SightLog.start_run({
 		"seed": RANDOM_SEED,
 		"mode": mode,
 		"screen_width": SCREEN_WIDTH,
@@ -93,14 +93,14 @@ func _physics_process(delta: float) -> void:
 		"action": action,
 	}
 	if _tcp_mode:
-		Logger.log_event("player_tick", rec)
+		SightLog.log_event("player_tick", rec)
 	else:
 		rec["threat"] = perceived.get("threat", false)
 		if perceived.get("threat", false):
 			rec["threat_x"] = perceived["x"]
 			rec["threat_y"] = perceived["y"]
 			rec["threat_dist"] = perceived["dist"]
-		Logger.log_event("agent_tick", rec)
+		SightLog.log_event("agent_tick", rec)
 
 	# 5. Spawn.
 	if _frame_counter % SPAWN_INTERVAL_FRAMES == 0:
@@ -118,7 +118,7 @@ func _spawn_hazard() -> void:
 	hz.position = Vector2(x, y)
 	add_child(hz)
 	_hazards.append(hz)
-	Logger.log_event("spawn", {
+	SightLog.log_event("spawn", {
 		"hazard_id": _hazard_id_counter,
 		"frame": _frame_counter,
 		"x": x,
@@ -127,14 +127,14 @@ func _spawn_hazard() -> void:
 
 func _on_player_died(survival_time: float, hazard_pos: Vector2, player_pos: Vector2) -> void:
 	_alive = false
-	Logger.log_event("collision", {
+	SightLog.log_event("collision", {
 		"player_x": player_pos.x,
 		"player_y": player_pos.y,
 		"hazard_x": hazard_pos.x,
 		"hazard_y": hazard_pos.y,
 	})
-	Logger.log_event("death", {"survival_time": survival_time})
-	Logger.end_run()
+	SightLog.log_event("death", {"survival_time": survival_time})
+	SightLog.end_run()
 	if _tcp != null:
 		_tcp.stop()
 	_survival_label.text = "DEAD  t=%.2fs" % survival_time

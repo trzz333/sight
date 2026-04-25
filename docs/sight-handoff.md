@@ -4,23 +4,20 @@ Canonical handoff document. Updated at the end of every session by whoever execu
 
 ---
 
-**Phase:** P2 in progress (Godot 4.6.2 installed, BOM strip landed, phase (a) blocked on two newly exposed Godot 4.5+ incompatibilities)
+**Phase:** P2 in progress (Godot 4.6 compat clear, default in-Godot phase (a) verified end to end)
 
-**Last commit:** 055ee3e P2: strip BOM from Godot text resources
+**Last commit:** cf140c9 handoff: Godot 4.6.2 installed, BOM strip landed, phase (a) blocked on Logger autoload + clampf
 
-**Current task:** Godot 4.6.2 installed on StrongerJr via `winget install GodotEngine.GodotEngine -e --silent --disable-interactivity` (no admin escalation; absolute exe at `C:\Users\maste\AppData\Local\Microsoft\WinGet\Packages\GodotEngine.GodotEngine_Microsoft.Winget.Source_8wekyb3d8bbwe\Godot_v4.6.2-stable_win64_console.exe`). All 8 BOM-bearing text resources stripped (3 .tscn, 4 .gd, project.godot) via explicit-file Python script in %TEMP% (no recursive PowerShell, no Bitdefender block this round). 36/36 pytest still green. Phase (a) launched and surfaced two parse-time blockers that did not exist in the Godot 4.3 era when the scaffold was authored.
+**Current task:** Godot 4.6.2 compatibility blockers cleared and phase (a) (default in_godot mode) verified live. Autoload key renamed `Logger` to `SightLog` in `games/signal-dodge/project.godot`; all 13 runtime call sites updated (`main.gd` x7, `tcp_controller.gd` x6) via explicit-file Python script in %TEMP%; `scripts/logger.gd` filename preserved. `player.gd:22` typed explicitly as `var dir: float = clampf(float(action), -1.0, 1.0)`. Claude proactively applied the same INFERRED_DECLARATION class fix to `tcp_controller.gd:121` (`var parse: Variant = JSON.parse_string(line)`) under revise-on-evidence authority since `JSON.parse_string` returns Variant and the same warning-as-error blocked the rerun. Phase (a) launched with absolute Godot exe and SIGHT_TCP_MODE unset; game ran 11.08 s, terminated normally on collision/death, NDJSON written.
 
-**Next action:** GPT decision required on the two blockers below before Claude touches main.gd or player.gd. Suggested combined commit shape `P2: Godot 4.6 compat (rename Logger autoload, type clampf in player.gd)`. After that single edit lands, re-run phase (a) with absolute Godot exe path and SIGHT_TCP_MODE unset.
+**Next action:** Phase (b) live verify of TCP mode. Set `SIGHT_TCP_MODE=1`, start Python harness on loopback, launch Godot, confirm controller_connected and controller_hello events plus agent action ingestion. Charter ethics rules unchanged.
 
-**Blockers:**
-
-1. Godot 4.5 introduced a native `Logger` class for engine log interception (4.5 release notes; Godot forum reports identical `Static function "x" not found in base "GDScriptNativeClass"` parse errors when migrating older projects). Project's autoload `Logger="*res://scripts/logger.gd"` now collides at parse time. 7 `Logger.` call sites in main.gd (lines 36, 96, 103, 121, 130, 136, 137) plus 1 line in project.godot need a rename. GPT to approve main.gd edit and pick autoload key (suggested SightLog | RunLog | EventLog).
-2. `player.gd:22` `var dir := clamp(float(action), -1.0, 1.0)` triggers `INFERRED_DECLARATION` warning-as-error in Godot 4.6 (variant `clamp` returns Variant; type inference yields Variant; default project warning level escalates). Minimal fix: `var dir: float = clampf(float(action), -1.0, 1.0)`. One file, one line.
+**Blockers:** none.
 
 **Notes:**
 
-- BOM strip method: explicit-file Python script in %TEMP% with literal 8-path list, no recursion, no PowerShell. Bitdefender did not flag. Verified post-strip via Python that no listed file starts EF BB BF.
-- Godot user_data dir is `%APPDATA%\Godot\app_userdata\Signal Dodge\`. `logs\godot.log` captured the parse errors verbatim; `runs\` directory was never created because Logger autoload `_ready` never fired.
-- winget `--silent --disable-interactivity` install completed without admin; PATH alias `godot` not created (admin-only behavior). Use absolute exe path; bare `godot` will not resolve in this shell.
-- `agent.gd`, `hazard.gd`, `logger.gd`, `player.gd` had BOM and lost it; `main.gd` and `tcp_controller.gd` were already BOM-free from later-session edits in editors that do not emit BOM.
+- NDJSON evidence: `C:\Users\maste\AppData\Roaming\Godot\app_userdata\Signal Dodge\runs\run_2026-04-25T07-45-15.ndjson`. 689 lines, 76 KB. Counts: run_start 1, agent_tick 663, spawn 22, collision 1, death 1, run_end 1. run_start payload includes path, seed=42, mode=in_godot, physics_hz=60.
+- BOM check post-edit: explicit-file Python scan of `.gd .godot .tscn .tres .import .cfg` under games/signal-dodge returned BOM_NONE. CRLF/LF: file bytes preserved by Python rb/wb roundtrip; git surfaces autocrlf warnings but `git diff --check` is clean.
+- `JSON.parse_string` returns Variant in Godot 4. Any future `var x := JSON.parse_string(...)` will trip 4.6 INFERRED_DECLARATION warning-as-error. Same pattern applies to other Variant-returning APIs; treat `:= some_variant_call()` as a 4.6 compat smell.
+- pytest 36 passed, 1 deselected, 0.34 s. No env or scaffold drift.
 - Loopback bind only, no external network surface. Charter ethics rules unchanged.

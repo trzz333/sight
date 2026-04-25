@@ -11,7 +11,7 @@ config/features=PackedStringArray("4.3", "GL Compatibility")
 
 [autoload]
 
-Logger="*res://scripts/logger.gd"
+SightLog="*res://scripts/logger.gd"
 
 [display]
 

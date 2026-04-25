@@ -19,7 +19,7 @@ func _ready() -> void:
 
 # Agent-driven. action: -1 left, 0 stay, +1 right. Called by Main each physics tick.
 func move_action(action: int, delta: float) -> void:
-	var dir := clamp(float(action), -1.0, 1.0)
+	var dir: float = clampf(float(action), -1.0, 1.0)
 	position.x += dir * SPEED * delta
 	position.x = clamp(position.x, SIZE / 2.0, SCREEN_WIDTH - SIZE / 2.0)
 
