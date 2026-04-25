@@ -1,4 +1,4 @@
-﻿extends Area2D
+extends Area2D
 
 # Player - Area2D. Agent-driven movement via move_action(). Emits died() on hazard contact.
 

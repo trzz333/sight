@@ -1,4 +1,4 @@
-﻿extends Node
+extends Node
 
 # Sight - minimal NDJSON logger.
 # Logs to user://runs/run_<timestamp>.ndjson. One event per line.

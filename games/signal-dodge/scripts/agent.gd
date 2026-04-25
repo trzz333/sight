@@ -1,4 +1,4 @@
-﻿extends Node
+extends Node
 
 # Sight - minimal deterministic rule agent.
 # Pipeline: capture -> perceive -> decide

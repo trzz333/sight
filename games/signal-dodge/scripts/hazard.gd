@@ -1,4 +1,4 @@
-﻿extends Area2D
+extends Area2D
 
 # Hazard - Area2D. Driven by Main.step(delta). Returns true when offscreen (to be culled).
 
