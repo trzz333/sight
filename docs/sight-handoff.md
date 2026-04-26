@@ -6,7 +6,7 @@ Canonical handoff document. Updated at the end of every session by whoever execu
 
 **Phase:** P3 in progress. Live harness audit complete; implementation pending GPT reconciliation. Loader at 5052a96 frozen for this slice.
 
-**Last commit:** PLACEHOLDER_HASH PLACEHOLDER_SUBJECT
+**Last commit:** 787b9f0 handoff: P3 live-harness audit complete; implementation pending GPT plan
 
 **Current task:** Read-only audit of wip/p3-live-harness-pre-plan at 13b2e06 against GPT's 12-point live-harness plan finished. Eight points match. Three hard mismatches: no explicit --live flag (live is the default path), no runs\\diagnostics\\p3-live-<batch>\\ split (stdout/stderr land inside the eval episode dir), and the harness uses snapshot-and-copy from Godot user://runs instead of writing godot.ndjson via SIGHT_GODOT_LOG_PATH (the env var does not exist anywhere in repo on either branch). One soft mismatch: src/sight_agent/harness/tcp_client.py duplicates four helpers already living in scripts/run_phase_b.py. One pre-existing gap on main: GDScript never emits success_budget_reached and never tracks actions_budget; loader derives success from decision_count >= actions_budget AND apply_ratio >= 0.9.
 
