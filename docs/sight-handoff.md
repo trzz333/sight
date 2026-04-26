@@ -6,7 +6,7 @@ Canonical handoff document. Updated at the end of every session by whoever execu
 
 **Phase:** P3 in progress. Pure metric-core slice landed; harness slice pending GPT plan.
 
-**Last commit:** TBD
+**Last commit:** 1452261 handoff: P3 metric-core slice recorded
 
 **Current task:** Pure P3 metric aggregator landed at src/sight_agent/evaluator/metrics.py with a 14-test fixture suite at tests/test_metrics.py. The module computes win_rate, episode length in actions and wall-time (mean, median, p95), action distribution counts, Shannon entropy in bits, and terminal and failure counts over the six terminal events. Episodes flagged ignore_death_active=True are excluded from every aggregate per the spec invariant; the module reads no env vars itself. A regression test fails if the literal SIGHT_TCP_IGNORE_DEATH appears under src/evaluator/, src/sight_agent/evaluator/, or scripts/run_p3_eval*.py outside an explicit refusal-check guard. Full pytest: 60 passed, 1 deselected (up from 46/1). Phase B reconcile evaluator untouched.
 
