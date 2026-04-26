@@ -6,7 +6,7 @@ Canonical handoff document. Updated at the end of every session by whoever execu
 
 **Phase:** P3 in progress. Per-episode loader and runner scaffold landed at 5052a96. Live Godot harness plan pending GPT. Pre-plan live-harness work preserved on branch wip/p3-live-harness-pre-plan; main is clean.
 
-**Last commit:** e24a843 handoff: clean chat-roundtrip contamination
+**Last commit:** f3d06bf handoff: P3 live-harness quarantined on wip branch; main clean
 
 **Current task:** Pre-plan P3 live-harness work (uncommitted on main at session start) is now quarantined on branch wip/p3-live-harness-pre-plan at commit 13b2e06 and pushed to origin. Main is clean and the no-live-launch-before-GPT-plan gate is intact. Loader at src/sight_agent/evaluator/episodes.py and runner scaffold at scripts/run_p3_eval.py from 5052a96 remain authoritative on origin/main.
 
