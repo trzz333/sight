@@ -4,20 +4,20 @@ Canonical handoff document. Updated at the end of every session by whoever execu
 
 ---
 
-**Phase:** P2 closed (Grok GREEN, no material concerns); P3 entry, spec drafted and review-patched, awaiting GPT final pass before any harness or evaluator code.
+**Phase:** P3 in progress. Pure metric-core slice landed; harness slice pending GPT plan.
 
-**Last commit:** efab7e5 docs: clarify Signal Dodge win/terminal semantics in P3 metrics spec
+**Last commit:** TBD
 
-**Current task:** docs/sight-p3-metrics.md was patched per GPT review to clarify Signal Dodge win/terminal semantics. The spec now declares an explicit Terminal events list (success_budget_reached, hazard_collision, transport_drop, harness_abort, timeout, other), recasts the failure taxonomy as the derived non-success view, and narrows timeout to mean harness hard-ceiling exceeded or terminal classification lost (never normal successful survival to the configured budget). The SIGHT_TCP_IGNORE_DEATH exclusion invariant is unchanged in force. Spec is still roughly one page.
+**Current task:** Pure P3 metric aggregator landed at src/sight_agent/evaluator/metrics.py with a 14-test fixture suite at tests/test_metrics.py. The module computes win_rate, episode length in actions and wall-time (mean, median, p95), action distribution counts, Shannon entropy in bits, and terminal and failure counts over the six terminal events. Episodes flagged ignore_death_active=True are excluded from every aggregate per the spec invariant; the module reads no env vars itself. A regression test fails if the literal SIGHT_TCP_IGNORE_DEATH appears under src/evaluator/, src/sight_agent/evaluator/, or scripts/run_p3_eval*.py outside an explicit refusal-check guard. Full pytest: 60 passed, 1 deselected (up from 46/1). Phase B reconcile evaluator untouched.
 
-**Next action:** GPT runs the final review pass against docs/sight-p3-metrics.md. On PASS, Claude implements the smallest harness slice next session, starting with scripts/run_p3_eval.py and a minimal src/evaluator/ aggregator plus tests. No P3 code lands before GPT PASS.
+**Next action:** GPT reviews the metric-core API and plans the next slice. Default queued slice is scripts/run_p3_eval.py with a SIGHT_TCP_IGNORE_DEATH refusal-to-start guard, plus a per-episode NDJSON loader that constructs Episode records and surfaces ignore_death_active from run metadata. No new harness code lands before GPT plan.
 
 **Blockers:** none.
 
 **Notes:**
 
-- P2 formally closed. Grok verdict GREEN, no material concerns, no required changes. Functional acceptance d167f32; docs hygiene 2032467; closeout state 28da97a; hash refresh 96aa2ef.
-- SIGHT_TCP_IGNORE_DEATH is banned from all P3 metric-contributing paths. Three enforcement points written into the spec: scripts/run_p3_eval.py refusal-to-start when the env var is set, src/evaluator/ skip-and-log on per-episode artifacts whose run metadata indicates the flag was active, and a regression test that fails if the literal string appears under src/evaluator/ or in scripts/run_p3_eval\*.py outside an explicit refusal-check guard. Patch verified the string count in the spec is unchanged at 7 occurrences.
-- Phase B 300-action clean run remains a transport-only result. Gameplay survivability is now P3 scope. Run artifacts at runs\\diagnostics\\phase_b_live_20260426T074225\\ are preserved as the transport reference.
-- GPT review pass identified Signal Dodge survival semantics as the one ambiguity worth patching pre-implementation; that patch is now landed. Remaining open spec choices for GPT's final pass: whether action distribution should also be reported per action-type-class above the primitive level; artifact directory layout runs\\eval\\ vs runs\\diagnostics\\ separation; whether per-game success terminals beyond survival need a registration mechanism in the spec.
-- Environment notes preserved. Use absolute paths C:\\Program Files\\Git\\cmd\\git.exe and C:\\Users\\maste\\AppData\\Local\\Python\\bin\\python.exe (Python 3.14.4). Atomic Python writes preferred over Desktop Commander edit_block on docs files. PowerShell Set-Content -Encoding UTF8 writes a BOM and contaminates commit messages.
+- Metric-core landed at be18519. New files src/sight_agent/evaluator/metrics.py (5621 B) and tests/test_metrics.py (8705 B). Pytest 60 passed / 1 deselected.
+- SIGHT_TCP_IGNORE_DEATH is banned from P3 metric paths. The aggregator reads no env vars; the Episode loader contract carries an ignore_death_active flag set from run metadata. Regression guard test scans both src/evaluator/ and src/sight_agent/evaluator/ plus scripts/run_p3_eval*.py for unguarded occurrences of the literal.
+- Path-mapping note. Spec language uses src/evaluator/ ; the actual canonical Python package is src/sight_agent/evaluator/ (only the src tree is under setuptools package-dir). Tests scan both locations so the spec wording stays valid even if a future src/evaluator/ ever gets created.
+- Still open for GPT to consider before more P3 code lands: per-action-type-class distribution above the primitive level; runs\\eval\\ vs runs\\diagnostics\\ layout split for P3 eval batches; per-game success terminal registration mechanism beyond survival.
+- Environment notes preserved. Use absolute paths C:\\Program Files\\Git\\cmd\\git.exe and C:\\Users\\maste\\AppData\\Local\\Python\\bin\\python.exe (Python 3.14.4). For doc edits use atomic Python re.subn + os.replace. For code files in REPL, use ``code = """..."""`` then a single-line ``open(path, "w", encoding="utf-8", newline="\r\n").write(code)``; multi-line ``with`` blocks barf silently in REPL line-mode.
