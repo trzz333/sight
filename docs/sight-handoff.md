@@ -6,7 +6,7 @@ Canonical handoff document. Updated at the end of every session by whoever execu
 
 **Phase:** P2 complete (Phase B 300-action TCP transport gate clean; closeout review packet drafted, awaiting Grok sanity check per charter)
 
-**Last commit:** TBD
+**Last commit:** 28da97a handoff: P2 closeout review state recorded
 
 **Current task:** P2 closeout review packet has been produced for Jeff to relay to Grok per the charter's "Each gate: Grok sanity check before proceeding" rule. Functional acceptance is at d167f32 (SIGHT_TCP_IGNORE_DEATH test flag plus promoted scripts/run_phase_b_live.py). Docs hygiene at 2032467 (auto-link noise removed from docs/sight-handoff.md, Last commit field aligned with HEAD-success). pytest reverified at 2032467: 46 passed, 1 deselected, 0.51s. Transport-endurance result preserved as transport-only; gameplay survivability is explicitly deferred to P3.
 
