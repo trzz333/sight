@@ -23,6 +23,7 @@ var _hazards: Array = []
 var _hazard_id_counter := 0
 var _tcp = null  # tcp_controller.gd instance; kept duck-typed so method calls resolve dynamically
 var _tcp_mode := false
+var _tcp_ignore_death := false  # SIGHT_TCP_IGNORE_DEATH=1 + TCP mode: keep the run alive past collision for transport endurance tests. Default false; gameplay unchanged in non-TCP mode.
 
 @onready var _player: Area2D = $Player
 @onready var _agent: Node = $Agent
@@ -32,8 +33,9 @@ func _ready() -> void:
 	seed(RANDOM_SEED)
 	_run_start_ms = Time.get_ticks_msec()
 	_tcp_mode = OS.get_environment("SIGHT_TCP_MODE") == "1"
+	_tcp_ignore_death = _tcp_mode and (OS.get_environment("SIGHT_TCP_IGNORE_DEATH") == "1")
 	var mode := "tcp" if _tcp_mode else "in_godot"
-	SightLog.start_run({
+	var run_meta := {
 		"seed": RANDOM_SEED,
 		"mode": mode,
 		"screen_width": SCREEN_WIDTH,
@@ -41,7 +43,10 @@ func _ready() -> void:
 		"spawn_interval_frames": SPAWN_INTERVAL_FRAMES,
 		"hazard_size": HAZARD_SIZE,
 		"physics_hz": 60,
-	})
+	}
+	if _tcp_mode:
+		run_meta["tcp_ignore_death"] = _tcp_ignore_death
+	SightLog.start_run(run_meta)
 	_player.died.connect(_on_player_died)
 	if _tcp_mode:
 		_tcp = TCP_CONTROLLER.new()
@@ -126,6 +131,20 @@ func _spawn_hazard() -> void:
 	})
 
 func _on_player_died(survival_time: float, hazard_pos: Vector2, player_pos: Vector2) -> void:
+	# TCP test mode: when SIGHT_TCP_MODE=1 and SIGHT_TCP_IGNORE_DEATH=1, log a non-terminal
+	# event and keep the run alive so the harness can verify TCP transport endurance over
+	# the full ACTIONS budget. Default and non-TCP gameplay behavior is unchanged. The flag
+	# is opt-in and only consulted when _tcp_mode is true.
+	if _tcp_mode and _tcp_ignore_death:
+		SightLog.log_event("tcp_death_ignored", {
+			"survival_time": survival_time,
+			"player_x": player_pos.x,
+			"player_y": player_pos.y,
+			"hazard_x": hazard_pos.x,
+			"hazard_y": hazard_pos.y,
+			"frame": _frame_counter,
+		})
+		return
 	_alive = false
 	SightLog.log_event("collision", {
 		"player_x": player_pos.x,
