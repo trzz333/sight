@@ -6,7 +6,7 @@ Canonical handoff document. Updated at the end of every session by whoever execu
 
 **Phase:** P2 closed (Grok GREEN, no material concerns); P3 entry, spec drafted, awaiting review before any harness or evaluator code.
 
-**Last commit:** TBD
+**Last commit:** 4885a97 docs: add P3 metrics spec and record P2 closeout
 
 **Current task:** docs/sight-p3-metrics.md drafted as the smallest P3 entry slice. The spec defines win rate, episode length (actions and wall-time), action distribution (counts and Shannon entropy in bits), and a five-value failure taxonomy (hazard_collision, transport_drop, harness_abort, timeout, other). It includes a hard SIGHT_TCP_IGNORE_DEATH exclusion invariant binding on the future implementation slice, plus a review checklist that gates any P3 code. Repo state was clean and HEAD was 96aa2ef before the docs commit.
 
