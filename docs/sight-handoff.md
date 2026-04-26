@@ -6,7 +6,7 @@ Canonical handoff document. Updated at the end of every session by whoever execu
 
 **Phase:** P2 closed (Grok GREEN, no material concerns); P3 entry, spec drafted and review-patched, awaiting GPT final pass before any harness or evaluator code.
 
-**Last commit:** TBD
+**Last commit:** efab7e5 docs: clarify Signal Dodge win/terminal semantics in P3 metrics spec
 
 **Current task:** docs/sight-p3-metrics.md was patched per GPT review to clarify Signal Dodge win/terminal semantics. The spec now declares an explicit Terminal events list (success_budget_reached, hazard_collision, transport_drop, harness_abort, timeout, other), recasts the failure taxonomy as the derived non-success view, and narrows timeout to mean harness hard-ceiling exceeded or terminal classification lost (never normal successful survival to the configured budget). The SIGHT_TCP_IGNORE_DEATH exclusion invariant is unchanged in force. Spec is still roughly one page.
 
