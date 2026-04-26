@@ -288,3 +288,63 @@ def test_run_id_missing_returns_none_mismatch():
     assert metrics["godot_run_id"] is None
     assert metrics["python_run_id"] == "python-only"
     assert metrics["run_id_mismatch"] is None
+
+
+def test_reconcile_joins_seq_zero_first_command():
+    """Regression: seq=0 is a valid first-command seq on the wire. The Python reconciler
+    must join it the same as any other seq. The companion guard is in
+    games/signal-dodge/scripts/tcp_controller.gd where _last_seq is initialized to -1
+    so seq=0 does not collide with a "no command yet" sentinel. This test pins the
+    Python contract so a future "filter out seq=0" change cannot land silently."""
+
+    run_id = "run_seq_zero"
+    godot_events = [
+        {"run_id": run_id, "type": "run_start", "seed": constants.RANDOM_SEED},
+        {
+            "run_id": run_id,
+            "type": "controller_cmd_applied",
+            "seq": 0,
+            "frame": 1,
+            "action": "left",
+            "move_x": -1,
+        },
+        {
+            "run_id": run_id,
+            "type": "controller_cmd_applied",
+            "seq": 1,
+            "frame": 2,
+            "action": "right",
+            "move_x": 1,
+        },
+    ]
+    python_events = [
+        {
+            "run_id": run_id,
+            "type": "decision",
+            "seq": 0,
+            "capture_ts_unix_ns": 0,
+            "decision_ts_unix_ns": 0,
+            "action": "left",
+            "move_x": -1,
+        },
+        {
+            "run_id": run_id,
+            "type": "decision",
+            "seq": 1,
+            "capture_ts_unix_ns": 0,
+            "decision_ts_unix_ns": 0,
+            "action": "right",
+            "move_x": 1,
+        },
+    ]
+    join = reconcile(godot_events, python_events)
+    seqs = sorted(j["seq"] for j in join["joined"])
+    assert seqs == [0, 1]
+    assert join["unmatched_python"] == []
+    assert join["unmatched_godot"] == []
+    assert join["duplicate_applied_seq_count"] == 0
+
+    metrics = evaluate(godot_events, python_events)
+    assert metrics["joined_count"] == 2
+    assert metrics["unmatched_python_count"] == 0
+    assert metrics["unmatched_godot_count"] == 0

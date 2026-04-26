@@ -4,20 +4,20 @@ Canonical handoff document. Updated at the end of every session by whoever execu
 
 ---
 
-**Phase:** P2 complete pending Phase B seq=0 sentinel patch
+**Phase:** P2 in progress (Phase B seq=0 sentinel patched, live eval rerun pending)
 
-**Last commit:** 40f83bd handoff: P2 post-mortem on Phase B seq=0 sentinel
+**Last commit:** <pending refresh>
 
-**Current task:** Phase B post-mortem on the lone unmatched_python decision. Raw NDJSON inspection plus tcp_controller.gd review identifies the orphan as a deterministic seq=0 sentinel collision, not a shutdown-tail artifact. No evaluator or wire-protocol code was written this session.
+**Current task:** Patch B applied to games\signal-dodge\scripts\tcp_controller.gd. _last_seq and _last_logged_seq init to -1, log_applied guard now `_last_seq < 0`. Regression test added in tests\test_evaluator.py pinning Python reconciler behavior on seq=0. pytest 46/46 green. A 90-action live run produced fresh Godot and Python NDJSONs under runs\diagnostics\phase_b_live_20260425T192731\ but the inline harness raised JSONDecodeError in evaluate before printing metrics, so the verification gate is unproven.
 
-**Next action:** Patch games\signal-dodge\scripts\tcp_controller.gd to use _last_seq := -1 with `if _last_seq < 0: return` guard in log_applied. Re-run the 90-action verify, expect unmatched_python_count=0. Then run the 300-action confirmation pass.
+**Next action:** Re-run only the eval step against the existing 90-action artifacts at runs\diagnostics\phase_b_live_20260425T192731\ before launching any new Godot run. Gate stays joined_count=90, unmatched_python_count=0, unmatched_godot_count=0, duplicate_applied_seq_count=0, run_id_mismatch=False. If clean, the 300-action confirmation pass can run.
 
-**Blockers:** Jeff approval to apply patch B (Godot sentinel fix) and to relay the corrected diagnosis to GPT. Decide whether Grok needs a second sanity pass against raw data.
+**Blockers:** none. GPT pause was procedural tool-budget, not an evidence blocker. Patch decision was already relayed by Jeff and is now committed.
 
 **Notes:**
 
-- tcp_controller.gd line 30 inits `var _last_seq := 0` and line 143 guards `if _last_seq <= 0: return`. Python's first action carries seq=0, collides with the sentinel, never logs controller_cmd_applied for that seq. seq=1..89 pass the guard and apply normally.
-- Live run evidence. Python decisions span 0..89 (90 events). Godot applied span 1..89 (89 events). Last seqs match on both sides at ts_unix_ns 1777155141221667584. No contiguous-suffix orphan.
-- GPT shutdown-tail diagnosis is wrong on this run. Grok GREEN endorsed the prompt framing without raw NDJSON review. Patch B keeps the wire contract one-way and unchanged.
-- Tolerance code in src\sight_agent\evaluator\reconcile.py may be unnecessary once the sentinel is fixed. Defer until evidence of an actual artifact appears in instrumented runs.
-- Working tree had pre-existing cosmetic double-backslash drift in this file. Resolved by this rewrite.
+- Sentinel patch is narrow. Wire protocol unchanged. Python seq numbering unchanged. Tolerance code in src\sight_agent\evaluator\reconcile.py untouched.
+- Live verification harness lives at C:\Users\maste\AppData\Local\Temp\sight_phase_b_runner.py. Outside the repo on purpose. Promote to scripts\ if it earns its keep, but isolate the flush race first.
+- 90-action live data on disk is intact and well-formed at byte level for the run_start record on both sides. JSONDecodeError fired at line 1 col 42 inside evaluate's second load_ndjson pass. Likely a flush race between Godot's _file and external terminate. Investigate before next round.
+- Working-tree backslash drift in this file was reverted at session start via git restore. Net delta vs HEAD bceaae3 was zero before this session's writes.
+- 300-action confirmation pass remains gated on a clean 90-action eval. Not run.

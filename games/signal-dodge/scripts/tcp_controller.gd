@@ -28,10 +28,12 @@ var _recv_buf := PackedByteArray()
 # Latest action state. Held across frames per spec: if no new command, hold previous action.
 var _last_action := "stay"
 var _last_move_x := 0
-var _last_seq := 0
+# Sentinels for "no command received yet". Python's first action carries seq=0, so the
+# pre-command sentinel must be a value seq cannot take. -1 is reserved for that role.
+var _last_seq := -1
 var _last_ts_unix_ns := 0
 # First-applied-frame guard. log_applied() compares _last_seq against _last_logged_seq.
-var _last_logged_seq := 0
+var _last_logged_seq := -1
 
 # run_id captured from hello; stamped onto every controller_* event afterwards.
 var _run_id := ""
@@ -149,7 +151,7 @@ func _handle_line(line: String) -> void:
 # Main calls this after move_action to log that the command was applied on this frame.
 # First-applied-frame semantics: at most one controller_cmd_applied per new seq.
 func log_applied(frame: int) -> void:
-	if _last_seq <= 0:
+	if _last_seq < 0:
 		return
 	if _last_seq == _last_logged_seq:
 		return  # already logged this seq on its first applied frame; held action carries silently
