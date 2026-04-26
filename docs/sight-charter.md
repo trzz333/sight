@@ -61,7 +61,6 @@ C:\Projects\Sight\
 - Claude: executes, revises GPT, vetoes on evidence grounds, owns end-of-round commit + handoff update
 - Grok: pulled for (a) unresolved GPT/Claude disagreement after 2 rounds, (b) domains where both are weak (RL internals, Godot specifics, CV tradeoffs on low-spec hardware), (c) phase-gate sanity checks
 - Jeff: relays, synthesizes, ground-truth backstop, decides on direction, approvals, and anything touching supervision
-
 ## Phase Gates (90 days)
 
 - P1 (days 1-14): Godot game chosen; repo scaffolded with charter and ethics
@@ -72,6 +71,10 @@ C:\Projects\Sight\
 - P6 (days 76-90): Product decision (SaaS, contract pitch, or both)
 
 Each gate: Grok sanity check before proceeding.
+
+## Future target: timer-economy macro sandbox
+
+Once the agent loop, live harness, and measurement layer are reliable, Sight should add a custom or local strategy environment modeled on the planning shape of timer and macro games. Target gameplay shape includes building timers, unit queues, resource constraints, upgrades, army and unit composition, XP and general/commander progression, recurring events, and many low-stakes repeated action choices. The purpose is to evaluate long-horizon prioritization, queue management, and opportunity-cost reasoning, not live-service automation. This target stays inside the ethics boundary above. Custom Godot or local sandbox first, or open-source and otherwise permitted environments only. No live commercial games, no ToS-prohibited automation, no bot-detection evasion, no Freecash/offerwall work, no account farming, and no live-service cheat-pipeline assets.
 
 ## Success Criteria
 
