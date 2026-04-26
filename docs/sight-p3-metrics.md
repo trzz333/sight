@@ -16,7 +16,9 @@ Out of scope (this spec): ML training curves, leaderboards, multi-agent comparis
 
 ### Win rate
 
-Fraction of episodes where the agent reached the configured success terminal (e.g., goal reached, score threshold). Computed as wins / total_episodes. Episodes excluded by the IGNORE_DEATH invariant (below) do not count toward total_episodes.
+Fraction of episodes that ended with a success terminal. Computed as wins / total_episodes. Episodes excluded by the IGNORE_DEATH invariant (below) do not count toward total_episodes.
+
+For the first P3 target (Signal Dodge), the configured success terminal is survival to the configured episode budget (action count or wall-time, whichever is declared as the success budget). A survival-budget completion is a win, not a timeout. Game-specific success terminals (goal reached, score threshold) may be added per game without changing this metric; the spec only fixes that each game declares its success terminal explicitly. See Terminal events below.
 
 ### Episode length, actions
 
@@ -34,17 +36,22 @@ Histogram of action types emitted in the episode (e.g., move_left, move_right, j
 
 Shannon entropy in bits of the per-episode action histogram, H = -sum(p_i * log2(p_i)) over action types with p_i > 0. Reported per-episode and as batch mean. Detects degenerate single-action policies.
 
-### Failure taxonomy
+### Terminal events
 
-Each non-win episode is labeled with exactly one terminal cause. Allowed values:
+Every episode ends in exactly one classified terminal event. Allowed values:
 
+- success_budget_reached: agent survived to the configured success budget; counts as a win for survival-shaped games such as Signal Dodge
 - hazard_collision: agent died from an in-game hazard (intended game-over)
 - transport_drop: TCP transport lost or unrecoverable mid-episode
 - harness_abort: harness-side error or supervisor abort
-- timeout: episode exceeded the configured action or wall-time budget without reaching a terminal
+- timeout: harness exceeded its hard safety ceiling, or terminal classification was lost (e.g., game state unparseable). Not equivalent to normal successful survival; survival to the success budget is success_budget_reached, never timeout.
 - other: any cause not matching the above; must include a short reason string
 
-Reported as a counts table.
+Win rate counts only success_budget_reached and any future declared success terminals. The failure taxonomy below is the derived counts table over the non-success terminals.
+
+### Failure taxonomy
+
+Each non-win episode is labeled with exactly one terminal event from the non-success set: hazard_collision, transport_drop, harness_abort, timeout, other. Reported as a counts table.
 
 ## Run artifact shape (high-level)
 
