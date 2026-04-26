@@ -1,3 +1,0 @@
-patch: Godot tcp_controller seq=0 sentinel and seq-zero regression test
-
-_last_seq and _last_logged_seq now init to -1 and log_applied guards on _last_seq < 0. Python reconciler test pins seq=0 first-command behavior so a future filter-out-seq-zero change cannot land silently. pytest 46/46 green. Live 90-action verify still pending eval rerun.

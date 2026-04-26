@@ -6,7 +6,7 @@ Canonical handoff document. Updated at the end of every session by whoever execu
 
 **Phase:** P2 in progress (Phase B seq=0 sentinel patched, live eval rerun pending)
 
-**Last commit:** <pending refresh>
+**Last commit:** 764e620 patch: Godot tcp_controller seq=0 sentinel and seq-zero regression test
 
 **Current task:** Patch B applied to games\signal-dodge\scripts\tcp_controller.gd. _last_seq and _last_logged_seq init to -1, log_applied guard now `_last_seq < 0`. Regression test added in tests\test_evaluator.py pinning Python reconciler behavior on seq=0. pytest 46/46 green. A 90-action live run produced fresh Godot and Python NDJSONs under runs\diagnostics\phase_b_live_20260425T192731\ but the inline harness raised JSONDecodeError in evaluate before printing metrics, so the verification gate is unproven.
 
