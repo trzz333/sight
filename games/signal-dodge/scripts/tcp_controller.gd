@@ -34,6 +34,10 @@ var _last_seq := -1
 var _last_ts_unix_ns := 0
 # First-applied-frame guard. log_applied() compares _last_seq against _last_logged_seq.
 var _last_logged_seq := -1
+# Distinct-seq apply counter. Increments only when log_applied() actually emits a
+# controller_cmd_applied event for a new seq. Held actions (same seq carrying across
+# frames) do not increment. Used by main.gd to enforce SIGHT_P3_ACTIONS_BUDGET.
+var _applied_count := 0
 
 # run_id captured from hello; stamped onto every controller_* event afterwards.
 var _run_id := ""
@@ -50,6 +54,11 @@ func is_active() -> bool:
 
 func run_id() -> String:
 	return _run_id
+
+# Distinct count of seq values that have been first-applied (i.e. produced a
+# controller_cmd_applied event). Held actions across frames do not count.
+func applied_count() -> int:
+	return _applied_count
 
 # Call once from Main._ready if SIGHT_TCP_MODE is enabled.
 func start(host: String = DEFAULT_HOST, port: int = DEFAULT_PORT) -> Error:
@@ -156,6 +165,7 @@ func log_applied(frame: int) -> void:
 	if _last_seq == _last_logged_seq:
 		return  # already logged this seq on its first applied frame; held action carries silently
 	_last_logged_seq = _last_seq
+	_applied_count += 1
 	SightLog.log_event("controller_cmd_applied", _decorate({
 		"seq": _last_seq,
 		"frame": frame,

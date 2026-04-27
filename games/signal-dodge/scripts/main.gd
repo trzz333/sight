@@ -24,6 +24,9 @@ var _hazard_id_counter := 0
 var _tcp = null  # tcp_controller.gd instance; kept duck-typed so method calls resolve dynamically
 var _tcp_mode := false
 var _tcp_ignore_death := false  # SIGHT_TCP_IGNORE_DEATH=1 + TCP mode: keep the run alive past collision for transport endurance tests. Default false; gameplay unchanged in non-TCP mode.
+# SIGHT_P3_ACTIONS_BUDGET is read once at _ready in TCP mode. Empty/missing/non-positive
+# values disable the success-budget terminal entirely. Gameplay and non-TCP behavior unchanged.
+var _actions_budget: int = 0
 
 @onready var _player: Area2D = $Player
 @onready var _agent: Node = $Agent
@@ -34,6 +37,13 @@ func _ready() -> void:
 	_run_start_ms = Time.get_ticks_msec()
 	_tcp_mode = OS.get_environment("SIGHT_TCP_MODE") == "1"
 	_tcp_ignore_death = _tcp_mode and (OS.get_environment("SIGHT_TCP_IGNORE_DEATH") == "1")
+	# SIGHT_P3_ACTIONS_BUDGET only consulted in TCP mode. int("") and int("abc") both
+	# return 0 in GDScript; zero or negative values keep _actions_budget at 0, which the
+	# physics_process check treats as "no success-budget terminal".
+	if _tcp_mode:
+		var parsed_budget := int(OS.get_environment("SIGHT_P3_ACTIONS_BUDGET"))
+		if parsed_budget > 0:
+			_actions_budget = parsed_budget
 	var mode := "tcp" if _tcp_mode else "in_godot"
 	var run_meta := {
 		"seed": RANDOM_SEED,
@@ -46,6 +56,8 @@ func _ready() -> void:
 	}
 	if _tcp_mode:
 		run_meta["tcp_ignore_death"] = _tcp_ignore_death
+		if _actions_budget > 0:
+			run_meta["actions_budget"] = _actions_budget
 	SightLog.start_run(run_meta)
 	_player.died.connect(_on_player_died)
 	if _tcp_mode:
@@ -89,6 +101,32 @@ func _physics_process(delta: float) -> void:
 	_player.move_action(action, delta)
 	if _tcp_mode:
 		_tcp.log_applied(_frame_counter)
+		# Success-budget terminal. Distinct from _on_player_died: runs only while alive and
+		# only when the configured number of distinct seqs have been first-applied. Logs the
+		# terminal event, ends the run cleanly, stops TCP, and quits. SIGHT_TCP_IGNORE_DEATH
+		# is not consulted here; this branch is gated by _alive (which the ignore-death path
+		# keeps true after collision) and the budget alone.
+		if _actions_budget > 0 and _alive:
+			var ac := _tcp.applied_count()
+			if ac >= _actions_budget:
+				_alive = false
+				var evt := {
+					"frame": _frame_counter,
+					"applied_count": ac,
+					"actions_budget": _actions_budget,
+				}
+				var rid := _tcp.run_id()
+				if rid != "":
+					evt["run_id"] = rid
+				var ep := OS.get_environment("SIGHT_EPISODE_ID")
+				if ep != "":
+					evt["episode_id"] = ep
+				SightLog.log_event("success_budget_reached", evt)
+				SightLog.end_run()
+				_tcp.stop()
+				_survival_label.text = "BUDGET MET  applied=%d" % ac
+				get_tree().quit()
+				return
 
 	# 4. Log player/agent tick.
 	var rec := {

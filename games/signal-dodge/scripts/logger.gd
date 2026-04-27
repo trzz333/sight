@@ -8,12 +8,27 @@ var _file: FileAccess = null
 var _run_start_ms: int = 0
 
 func start_run(meta: Dictionary = {}) -> void:
-	DirAccess.make_dir_recursive_absolute("user://runs")
-	var ts := Time.get_datetime_string_from_system().replace(":", "-")
-	var path := "user://runs/run_%s.ndjson" % ts
+	# SIGHT_GODOT_LOG_PATH overrides the default user://runs target. When set, the logger
+	# writes only to that absolute path; user://runs is not touched. The harness uses this
+	# to land godot.ndjson directly under runs/eval/<run_id>/episodes/<episode_id>/ without
+	# a user://-to-runs copy step. Empty/unset preserves legacy behavior.
+	var override_path := OS.get_environment("SIGHT_GODOT_LOG_PATH")
+	var path: String
+	var resolved_path: String
+	if override_path != "":
+		path = override_path
+		var parent := path.get_base_dir()
+		if parent != "":
+			DirAccess.make_dir_recursive_absolute(parent)
+		resolved_path = path
+	else:
+		DirAccess.make_dir_recursive_absolute("user://runs")
+		var ts := Time.get_datetime_string_from_system().replace(":", "-")
+		path = "user://runs/run_%s.ndjson" % ts
+		resolved_path = ProjectSettings.globalize_path(path)
 	_file = FileAccess.open(path, FileAccess.WRITE)
 	_run_start_ms = Time.get_ticks_msec()
-	var evt := {"path": ProjectSettings.globalize_path(path)}
+	var evt := {"path": resolved_path}
 	for k in meta.keys():
 		evt[k] = meta[k]
 	log_event("run_start", evt)
