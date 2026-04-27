@@ -6,7 +6,7 @@ Canonical handoff document. Updated at the end of every session by whoever execu
 
 **Phase:** P3 in progress. Live harness audit complete; implementation pending GPT reconciliation. Loader at 5052a96 frozen for this slice. Handoff tooling at 741d080 provisional and not re-dogfooded.
 
-**Last commit:** PLACEHOLDER_HASH PLACEHOLDER_SUBJECT
+**Last commit:** 1fb6a47 handoff: record handoff tooling recovery
 
 **Current task:** Recovered cleanly from a dogfood glitch in tools\handoff_update.py. CRLF anchor fix committed at 62a396e. The dead session ran a partial pass that injected PLACEHOLDER_HASH PLACEHOLDER_SUBJECT into the Last commit field of the handoff before failing; that doc damage was reverted via git restore. Root handoff_update.json (dogfood input payload) was removed. The "second regex bug" the dead session was diagnosing remains unverified. P3 audit state preserved at 787b9f0; nothing about the live-launch gate has changed.
 
