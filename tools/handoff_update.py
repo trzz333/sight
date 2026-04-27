@@ -62,11 +62,11 @@ GIT = r"C:\Program Files\Git\cmd\git.exe"
 # Anchored on the bold field markers. Each pattern matches the entire line
 # including the marker; the replacement carries the marker plus the new value.
 _FIELD_PATTERNS: dict[str, bytes] = {
-    "phase":        rb"\*\*Phase:\*\*[^\n]*",
-    "last_commit":  rb"\*\*Last commit:\*\*[^\n]*",
-    "current_task": rb"\*\*Current task:\*\*[^\n]*",
-    "next_action":  rb"\*\*Next action:\*\*[^\n]*",
-    "blockers":     rb"\*\*Blockers:\*\*[^\n]*",
+    "phase":        rb"\*\*Phase:\*\*[^\r\n]*",
+    "last_commit":  rb"\*\*Last commit:\*\*[^\r\n]*",
+    "current_task": rb"\*\*Current task:\*\*[^\r\n]*",
+    "next_action":  rb"\*\*Next action:\*\*[^\r\n]*",
+    "blockers":     rb"\*\*Blockers:\*\*[^\r\n]*",
 }
 _FIELD_PREFIX: dict[str, bytes] = {
     "phase":        b"**Phase:** ",
@@ -135,7 +135,7 @@ def _update_notes(data: bytes, notes: list[str]) -> bytes:
     # bullet line. The doc ends after the bullets so we anchor on the marker
     # plus all bullets that follow.
     new, n = re.subn(
-        rb"\*\*Notes:\*\*\n\n(?:- [^\n]*\n)+",
+        rb"\*\*Notes:\*\*\r?\n\r?\n(?:- [^\r\n]*\r?\n)+",
         block,
         data,
         count=1,
