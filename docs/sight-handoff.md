@@ -6,7 +6,7 @@ Canonical handoff document. Updated at the end of every session by whoever execu
 
 **Phase:** hobby RL/game-agent lab. Pivot merged to main. Hobby charter and target backlog live on main. Pre-pivot Python harness WIP archived unverified on `pivot-preserve-p3-wip` at a29beb3.
 
-**Last commit:** PENDING_POST_MERGE_COMMIT on main. Merge commit d363eb0 lands the pivot. Substantive pivot commits ef40f43 (recharter) and 909c81c (target backlog). Pre-pivot WIP archived at a29beb3 on `pivot-preserve-p3-wip`.
+**Last commit:** 3094655 on main. Merge commit d363eb0 lands the pivot. Substantive pivot commits ef40f43 (recharter) and 909c81c (target backlog). Pre-pivot WIP archived at a29beb3 on `pivot-preserve-p3-wip`.
 
 **Current task:** Pivot merged. Hobby charter active on main. Ready for H1.
 
