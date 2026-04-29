@@ -11,6 +11,10 @@ dependencies = [
     "mss>=9.0",
     "numpy>=1.24",
     "opencv-python>=4.8",
+    # H1 RL stack
+    "stable-baselines3>=2.0",
+    "gymnasium>=0.29",
+    "pyyaml>=6.0",
 ]
 
 [project.optional-dependencies]
