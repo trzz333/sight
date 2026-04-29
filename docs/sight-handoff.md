@@ -4,20 +4,20 @@ Canonical handoff document. Updated at the end of every session by whoever execu
 
 ---
 
-**Phase:** hobby RL/game-agent lab. Pivot merged to main. Hobby charter and target backlog live on main. Pre-pivot Python harness WIP archived unverified on `pivot-preserve-p3-wip` at a29beb3.
+**Phase:** H1 complete pending Grok sanity check. Local PPO baseline on Gymnasium CartPole-v1 trained, evaluated, and committed. Awaiting Grok H1 phase-gate review per charter, then GPT plans H2 (reusable training/eval harness, deterministic seeds, NDJSON, reproducible from config).
 
-**Last commit:** 3094655 on main. Merge commit d363eb0 lands the pivot. Substantive pivot commits ef40f43 (recharter) and 909c81c (target backlog). Pre-pivot WIP archived at a29beb3 on `pivot-preserve-p3-wip`.
+**Last commit:** 2a56e43 on main. `feat(rl): H1 PPO CartPole-v1 baseline with NDJSON logging`. Local only, push pending in this same operation.
 
-**Current task:** Pivot merged. Hobby charter active on main. Ready for H1.
+**Current task:** H1 substantive work landed locally. Push pending. Grok sanity check on H1 pending.
 
-**Next action:** Implement H1: local RL baseline on Gymnasium CartPole using Stable-Baselines3 or CleanRL with NDJSON training-metric logging. GPT issues the H1 implementation prompt next. Claude executes against that prompt.
+**Next action:** Push 2a56e43 plus this handoff commit to origin/main. Jeff sends H1 artifact bundle to Grok for phase-gate sanity check. On Grok GREEN, GPT issues H2 implementation prompt.
 
-**Blockers:** Stable-Baselines3 vs CleanRL choice not made (defer to GPT's H1 prompt). Pre-pivot Python harness WIP at a29beb3 is unverified, archive-only.
+**Blockers:** None technical. Grok sanity check is process-gated, not technical.
 
 **Notes:**
 
-- Jeff wants a hobby project, not a product validation track. Buyer-discovery gates retired. Success metric is learning progress and reproducible local training, not buyers or revenue.
-- Approved target ladder: Gymnasium -> custom Godot state env -> Godot pixels -> Signal Dodge/successor. Open-source single-player games allowed only after explicit license and automation review. No proprietary commercial game (Diablo II and similar) until legal/ToS posture is verified for that specific game and offline single-player use.
-- Future target candidates tracked in `docs/target-backlog.md`. No backlog target is approved. Backlog cannot displace H1-H5. Promotion requires Jeff-only approval after a written license/ToS/community/technical review.
-- Existing product-era code on main (Signal Dodge GDScript, TCP transport, controller, logger, evaluator metrics core) is reusable as Phase H3-H5 target environment. No code deletion in this pivot, only doc rewrite.
-- Pre-pivot Python harness WIP archived on `pivot-preserve-p3-wip` at a29beb3, unverified. Do not revive under the hobby track without an explicit decision and re-validation, since the slice was authored against product-era framing.
+- H1 verified run: `runs/rl/cartpole_ppo_h1/20260429T205656Z_cartpole_ppo_h1_seed0_1b4c741/`. 25k timesteps, 39.26s wall, status ok, final 5-episode eval mean_reward 500.0/500.0 (all 5 episodes perfect, std 0.0). Mid-train eval dipped at step 15k (228.2) and recovered by 20k (453.4); flagging for Grok eyeball, not a blocker.
+- Stable-Baselines3 selected over CleanRL for H1. Versions captured in summary.json: sb3 2.8.0, gymnasium 1.2.3, torch 2.11.0+cpu, python 3.14.4.
+- Editable install (`pip install -e .`) is the supported install path. PYTHONPATH approach rejected. The `ModuleNotFoundError: No module named 'sight_agent'` seen mid-session was install-state, not code.
+- 18/18 rl tests pass at commit time. Full repo suite not re-run this session; H2 should bake a smoke-test gate around the training entrypoint into the harness.
+- Pre-pivot Python harness WIP at a29beb3 on `pivot-preserve-p3-wip` remains archive-only. H1 was authored fresh against the hobby charter, not revived from the archive.
