@@ -4,20 +4,20 @@ Canonical handoff document. Updated at the end of every session by whoever execu
 
 ---
 
-**Phase:** H1 complete pending Grok sanity check. Local PPO baseline on Gymnasium CartPole-v1 trained, evaluated, committed, and packaged for review. Awaiting Grok H1 phase-gate verdict per charter, then GPT plans H2.
+**Phase:** H1 complete pending Grok final GREEN. YELLOW repro check completed: fresh clone of c958def trained PPO on CartPole-v1, summary.status=ok, final eval mean_reward=500.0. Awaiting Grok to convert YELLOW to GREEN, then GPT plans H2.
 
-**Last commit:** ce060a0 docs: add H1 Grok phase gate packet
+**Last commit:** b5b4028 docs: add H1 fresh repro evidence
 
-**Current task:** H1 substantive work landed and pushed. Grok phase-gate packet written, committed, pushed. Awaiting Jeff to relay packet to Grok and Grok's GREEN/YELLOW/RED verdict.
+**Current task:** YELLOW repro check completed. Repro evidence at `docs/grok-h1-yellow-repro.md`. Awaiting Jeff to relay evidence to Grok and Grok's final verdict.
 
-**Next action:** Jeff sends `docs/grok-h1-phase-gate-packet.md` (and the run artifact bundle if Grok requests it) to Grok. On Grok GREEN, GPT issues H2 implementation prompt. On YELLOW, Claude executes the specific repro/check Grok asks for. On RED, stop and triage.
+**Next action:** Jeff sends `docs/grok-h1-yellow-repro.md` to Grok. On final GREEN, GPT issues H2 implementation prompt. On further YELLOW, Claude executes the next specific check. On RED, stop and triage. Do not begin H2 work.
 
-**Blockers:** None technical. Grok review is process-gated, not code-gated.
+**Blockers:** None technical. Process-gated on Grok's final verdict.
 
 **Notes:**
 
-- H1 verified run: `runs/rl/cartpole_ppo_h1/20260429T205656Z_cartpole_ppo_h1_seed0_1b4c741/`. 25k timesteps, 39.26s wall, status ok, final 5-episode eval mean_reward 500.0/500.0 (std 0.0). Mid-train eval dipped at step 15k (228.2) and recovered by 20k (453.4); flagged in packet, not a blocker.
-- Stable-Baselines3 selected over CleanRL. Local versions: sb3 2.8.0, gymnasium 1.2.3, torch 2.11.0+cpu, python 3.14.4. pyproject pins are lower-bound only, no lock file. H2 should add a lock file or constraints.
-- 18/18 rl tests pass at HEAD ce060a0 in 8.50s. Smoke tests in `tests/rl/test_cartpole_smoke.py` invoke a real short training run and validate NDJSON contract end-to-end.
-- Fresh-checkout reproduction from config alone NOT independently verified this session; flagged as the one yellow item in the Grok packet. H2 will close this gap by design (`reproducible from a config file`).
-- Pre-pivot Python harness WIP at a29beb3 on `pivot-preserve-p3-wip` remains archive-only. H1 was authored fresh against the hobby charter, not revived from the archive.
+- Fresh-checkout repro on `c958def` under `PYTHONPATH=<scratch>\src` reproduced the eval trajectory exactly: 468.4 / 457.2 / 228.2 / 453.4 / 500.0 (steps 5k/10k/15k/20k/25k). Identical to original packet artifact, including the benign step-15k dip. Strong determinism evidence.
+- Repro run_id `20260429T222543Z_cartpole_ppo_h1_seed0_c958def`, 46.25s wall, 20 NDJSON lines, 0 malformed.
+- No source code changes this session. Only `docs/grok-h1-yellow-repro.md` (new, in `b5b4028`) and `docs/sight-handoff.md` (refreshed in the chore commit on top).
+- H2 not started. H2 plan still owned by GPT pending Grok final GREEN.
+- Pre-pivot Python harness WIP at `a29beb3` on `pivot-preserve-p3-wip` remains archive-only.
