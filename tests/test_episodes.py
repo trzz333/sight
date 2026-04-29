@@ -384,3 +384,78 @@ def test_run_p3_eval_from_artifacts_mode_writes_summary(tmp_path: Path, monkeypa
     assert summary["wins"] == 1
     assert summary["mode"] == "from_artifacts"
     assert summary["episode_ids"] == ["ep_001"]
+
+
+def test_loader_classifies_success_budget_reached_event_authoritative():
+    """Explicit Godot success_budget_reached event drives the terminal."""
+    godot, python = _build_clean_run(actions_budget=8)
+    godot.append({
+        "type": "success_budget_reached",
+        "frame": 200,
+        "applied_count": 8,
+        "actions_budget": 8,
+        "ts_unix_ns": python[-1]["decision_ts_unix_ns"] + 50_000_000,
+    })
+    ep = episode_from_events(
+        godot_events=godot,
+        python_events=python,
+        episode_id="ep_success_event",
+        actions_budget=8,
+    )
+    assert ep.terminal == "success_budget_reached"
+
+
+def test_loader_collision_outranks_success_event():
+    """Spec invariant: collision/death outranks success even when both appear."""
+    godot, python = _build_clean_run(actions_budget=4)
+    death_ts = python[-1]["decision_ts_unix_ns"] + 30_000_000
+    godot.append(_death(ts_ns=death_ts))
+    godot.append({
+        "type": "success_budget_reached",
+        "frame": 250,
+        "applied_count": 4,
+        "actions_budget": 4,
+        "ts_unix_ns": death_ts + 10_000_000,
+    })
+    ep = episode_from_events(
+        godot_events=godot,
+        python_events=python,
+        episode_id="ep_priority",
+        actions_budget=4,
+    )
+    assert ep.terminal == "hazard_collision"
+
+
+def test_classify_terminal_status_timeout_returns_timeout():
+    """harness_status=='timeout' is authoritative ahead of fallback derivation."""
+    godot, python = _build_clean_run(actions_budget=4)
+    terminal, _ts, _reason = classify_terminal(
+        godot_events=godot,
+        python_events=python,
+        actions_budget=4,
+        harness_status="timeout",
+    )
+    assert terminal == "timeout"
+
+
+def test_classify_terminal_godot_success_event_with_few_decisions():
+    """Godot success event drives terminal even when synthetic check would not."""
+    godot = [
+        {"type": "run_start", "run_id": "test-run", "seed": 42},
+        _applied(0),
+        _applied(1),
+        {
+            "type": "success_budget_reached",
+            "frame": 100,
+            "applied_count": 2,
+            "actions_budget": 2,
+            "ts_unix_ns": 5_000_000_000,
+        },
+    ]
+    python = [_decision(0, "left"), _decision(1, "right")]
+    terminal, _ts, _reason = classify_terminal(
+        godot_events=godot,
+        python_events=python,
+        actions_budget=999,  # synthetic fallback would NOT fire
+    )
+    assert terminal == "success_budget_reached"

@@ -12,6 +12,10 @@ Spec invariants enforced here:
   content. The runner scripts/run_p3_eval.py owns the env-var refusal guard.
 - Terminal classification produces exactly one of the six allowed values from
   metrics.TERMINAL_EVENTS.
+- Authoritative external signals (harness_status from the runner, explicit
+  Godot terminal events) win over derived heuristics. Death/collision evidence
+  always outranks success evidence so a fatal collision can never be relabeled
+  as a budget-reached success even if both events somehow appear in godot.ndjson.
 
 Public API:
 
@@ -46,11 +50,21 @@ _HARNESS_ABORT_STATUSES: frozenset[str] = frozenset(
     {"abort", "aborted", "error", "errored", "failed", "failure", "harness_abort"}
 )
 
+# Authoritative timeout signal from the live runner. Distinct from the derived
+# wall-time fallback further down so the harness can mark a forcibly-killed
+# Godot run as a real timeout without inferring from action timestamps.
+_HARNESS_TIMEOUT_STATUSES: frozenset[str] = frozenset({"timeout", "wall_time_timeout"})
+
 # Apply ratio below this threshold (with no death evidence) classifies as
 # transport_drop. Tuned high so genuine transport-clean batches never trip it.
 _TRANSPORT_DROP_APPLY_RATIO_THRESHOLD: float = 0.9
 
 _DEATH_EVENT_TYPES: frozenset[str] = frozenset({"death", "collision"})
+
+# Explicit Godot success terminal emitted by main.gd when applied_count >=
+# SIGHT_P3_ACTIONS_BUDGET in TCP mode. This is authoritative over the derived
+# decision-count fallback. Death/collision still outranks if both appear.
+_SUCCESS_EVENT_TYPES: frozenset[str] = frozenset({"success_budget_reached"})
 
 
 # --- low-level NDJSON I/O ---------------------------------------------------
@@ -200,25 +214,44 @@ def classify_terminal(
 ) -> tuple[str, int | None, str | None]:
     """Classify the terminal event for a single episode.
 
-    Priority cascade:
-      1. harness_abort  - external runner metadata says the harness aborted/errored
-      2. hazard_collision - any death/collision event in godot.ndjson
-      3. success_budget_reached - actions budget reached and transport healthy
-      4. transport_drop - apply ratio below threshold without death evidence
-      5. timeout - wall-time budget exceeded without success/death
-      6. other - reason string required
+    Priority cascade (top wins):
+      1. harness_status == harness_abort family   -> harness_abort
+      2. harness_status == timeout family         -> timeout
+      3. death or collision event in godot.ndjson -> hazard_collision
+      4. success_budget_reached event in godot.ndjson -> success_budget_reached
+      5. derived budget-reached + transport-clean -> success_budget_reached
+      6. derived low apply ratio                  -> transport_drop
+      7. derived wall-time exceeded               -> timeout
+      8. otherwise                                -> other (other_reason="unclassified")
+
+    Death/collision evidence outranks any success signal so a fatal collision
+    cannot be relabeled as a budget-reached success even if Godot also wrote a
+    success_budget_reached event.
 
     Returns (terminal, terminal_ts_ns_or_None, other_reason_or_None).
     """
-    if harness_status is not None and harness_status.lower() in _HARNESS_ABORT_STATUSES:
-        ts = _last_action_ts_ns(python_events)
-        return ("harness_abort", ts, None)
+    if harness_status is not None:
+        hs = harness_status.lower()
+        if hs in _HARNESS_ABORT_STATUSES:
+            ts = _last_action_ts_ns(python_events)
+            return ("harness_abort", ts, None)
+        if hs in _HARNESS_TIMEOUT_STATUSES:
+            ts = _last_action_ts_ns(python_events)
+            return ("timeout", ts, None)
 
     deaths = [e for e in godot_events if e.get("type") in _DEATH_EVENT_TYPES]
     if deaths:
         first = deaths[0]
         ts = _event_ts_ns(first) or _last_action_ts_ns(python_events)
         return ("hazard_collision", ts, None)
+
+    success_events = [
+        e for e in godot_events if e.get("type") in _SUCCESS_EVENT_TYPES
+    ]
+    if success_events:
+        first = success_events[0]
+        ts = _event_ts_ns(first) or _last_action_ts_ns(python_events)
+        return ("success_budget_reached", ts, None)
 
     decisions = [e for e in python_events if e.get("type") == "decision"]
     applies = [e for e in godot_events if e.get("type") == "controller_cmd_applied"]
