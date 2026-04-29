@@ -4,20 +4,20 @@ Canonical handoff document. Updated at the end of every session by whoever execu
 
 ---
 
-**Phase:** P3 in progress (GDScript foundation landed). Loader at 5052a96 and metrics core remain frozen for this slice. Handoff tooling at 741d080 still provisional and unused.
+**Phase:** pivot to hobby RL/game-agent lab. Pivot branch `pivot/hobby-rl-lab` open from main at 2b08a0b. Main untouched. Pre-pivot Python harness WIP preserved unverified on `pivot-preserve-p3-wip` at a29beb3.
 
-**Last commit:** 3cbd915 feat(godot): P3 GDScript foundation slice for live eval
+**Last commit:** PENDING_PIVOT_COMMIT on pivot/hobby-rl-lab. Pre-pivot WIP at a29beb3 on pivot-preserve-p3-wip. Main still at 2b08a0b handoff: P3 GDScript foundation slice landed.
 
-**Current task:** GDScript foundation slice shipped on main. logger.gd honors SIGHT_GODOT_LOG_PATH (writes only to that absolute path when set, parent dir created on demand, user://runs untouched). tcp_controller.gd tracks distinct first-applied seqs in _applied_count and exposes applied_count(). main.gd reads SIGHT_P3_ACTIONS_BUDGET only in TCP mode (empty/missing/non-positive disables the terminal) and emits success_budget_reached with frame, applied_count, actions_budget, optional run_id, optional episode_id (when SIGHT_EPISODE_ID set), then ends the run, stops TCP, and quits. Live-launch gate still active.
+**Current task:** Recharter Sight from product track to hobby and research lab. Done on this branch: charter rewritten with hobby-track mission, H1-H5 phase plan, expanded non-goals (offerwalls, Freecash, bot-detection evasion, account farming, online multiplayer, live-service games, proprietary commercial games until explicit legal/ToS posture verified), 64 GB RAM weaker-GPU hardware profile, retired P4-P6 product gates listed explicitly so they cannot quietly return. Handoff rewritten to match.
 
-**Next action:** GPT publishes the reconciled live P3 Python harness plan against the GDScript surface now on main (SIGHT_GODOT_LOG_PATH, SIGHT_P3_ACTIONS_BUDGET, SIGHT_EPISODE_ID, success_budget_reached event shape). Once published, Claude implements the Python slice on a fresh branch behind an explicit positive --live flag.
+**Next action:** Decide in-place recharter (merge `pivot/hobby-rl-lab` to main) versus new repo. Claude's recommendation: in-place. Reasoning at end of this doc. After decision, next session implements H1 (local RL baseline on Gymnasium CartPole with Stable-Baselines3 or CleanRL and NDJSON training-metric logging).
 
-**Blockers:** None. Live-launch gate active. tools\handoff_update.py still provisional; manual base64 plus os.replace remains canonical for docs\sight-handoff.md updates. Desktop Commander read_file is hazardous on Markdown in this repo (rewrites CRLF to LF, auto-links URLs, escapes HTML entities, doubles backslashes). Read Markdown docs via Filesystem MCP read_text_file only.
+**Blockers:** `pivot/hobby-rl-lab` unmerged. Main still carries product-era charter (mission text, P4-P6 product gates, success criteria of paying customer / contract / inbound). Pre-pivot Python harness WIP on `pivot-preserve-p3-wip` is unverified (not compiled, not tested this session). Choice of Stable-Baselines3 versus CleanRL not made.
 
 **Notes:**
 
-- 3cbd915 GDScript foundation. SIGHT_GODOT_LOG_PATH override in logger.gd, _applied_count and applied_count() in tcp_controller.gd, success_budget_reached terminal in main.gd that sets _alive=false and returns early. SIGHT_TCP_IGNORE_DEATH refusal guard in scripts\run_p3_eval.py untouched and unweakened.
-- success_budget_reached payload contract: frame, applied_count, actions_budget, run_id (when non-empty), episode_id (when SIGHT_EPISODE_ID set). run_start meta also records actions_budget when positive in TCP mode.
-- Working-tree line endings preserved per file: logger.gd CRLF, tcp_controller.gd and main.gd LF. Git index is LF for all three. Patches preserved per-file endings to keep the diff minimal.
-- DC read_file Markdown hazard recurred mid-session and was restored via git restore on docs\sight-charter.md and docs\sight-handoff.md before any new work landed. New rule codified: never use DC read_file on Markdown in this repo; use Filesystem MCP read_text_file.
-- Checks this session: pytest 81 passed and 1 deselected (live-gated test). git diff --check clean. No Godot launch. GDScript syntax remains untested at the engine level until the next headless or live run.
+- Jeff wants a hobby project, not a product validation track. Buyer-discovery gates retired. Success metric is learning progress and reproducible local training, not buyers or revenue.
+- Do not use Diablo II or any proprietary game until legal and ToS posture is verified for that specific game and that specific use.
+- Start with Gymnasium classic control or custom Godot microgames only. Open-source single-player games allowed only after explicit license and automation review.
+- Existing product-era code on main (Signal Dodge GDScript, TCP transport, controller, logger, evaluator metrics core) is reusable as a Phase H3-H5 target environment under the hobby track. No code deletion in this pivot, only doc rewrite.
+- Recommendation reasoning for in-place recharter: trzz333/sight is private, history of product-era attempts is informative not noise, GDScript and evaluator code carry over directly as H3-H5 target environment, two-repo bookkeeping costs more than one labeled pivot branch, and the pivot branch plus safety branch already mark the discontinuity in history.

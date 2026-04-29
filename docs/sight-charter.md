@@ -2,39 +2,50 @@
 
 ## Mission
 
-Build a local-first AI game-agent lab that perceives game state, decides actions, executes them, and improves through measurement. Ship the framework as a product and portfolio piece while maintaining unambiguous ethical and legal hygiene.
+Sight is a local-first ethical game-agent lab for learning RL and game-AI techniques and training small policies on a single older gaming laptop with 64 GB RAM and a weaker discrete GPU. Sight is a hobby and research project. Not a product. Not a startup. Not a customer-facing tool. Not a QA platform.
+
+Success is defined by learning progress and reproducible local training, not by buyers, revenue, contracts, pilots, or downstream commercial intent.
 
 ## Scope
 
-- Custom Godot micro-games (primary; Jeff owns game and assets)
-- Open-source games where automation is permitted (e.g., 0 A.D. single-player)
-- Formal RL benchmark environments via Gymnasium (credibility layer)
-- Council integration as optional decision layer (phase 2+)
+- Gymnasium classic control and toy-text environments (CartPole first)
+- Custom Godot microgames owned by this repo (Signal Dodge and successors)
+- Approved open-source single-player games, only after explicit license and automation review
 
 ## Non-Goals (explicit and permanent)
 
-- No live commercial game automation
-- No Freecash / offerwall / paid-engagement work, ever
+- No offerwalls
+- No Freecash or any paid-engagement work
 - No bot-detection evasion
 - No account farming or identity spoofing
-- No work on any platform where automation is prohibited by ToS
+- No online multiplayer
+- No live-service games
+- No live commercial games
+- No platforms where automation is prohibited by ToS
 - No assets or tooling that could drop into a live-service cheat pipeline
+- No product, customer, contract, pilot, buyer, or SaaS framing
+- No proprietary commercial games (e.g., Diablo II) until an explicit legal and ToS posture has been verified for that specific game and that specific use
 
 ## Ethics Armor
 
-- README and `ethics.md` state the non-goals verbatim
+- README and ethics.md state the non-goals verbatim
 - License: MIT
-- [CONTRIBUTING.md](http://CONTRIBUTING.md) rejects PRs targeting commercial live games
-- Every progression video frames its legitimate target environment explicitly
+- CONTRIBUTING.md rejects PRs targeting commercial live games or any other non-goal
+- Every published artifact frames its target environment explicitly
+
+## Hardware Profile
+
+- Target machine: older gaming laptop, 64 GB RAM, weaker discrete GPU
+- Optimize for small models, fast feedback loops, deterministic seeds, and reproducibility
+- Out of scope: large foundation models, multi-GPU training, frontier-scale RL
 
 ## Stack
 
-- Languages: Python (agent), GDScript (Godot games)
-- Perception: OpenCV + template matching first; small vision model (moondream via llama.cpp CPU) when genuinely needed
-- Policy: rule-based first; ML/RL layered in once loop is reliable
-- Decision layer (phase 2+): Council integration
-- Logging: structured NDJSON (pattern from Workbench)
-- Evaluation: win rate, episode length, action distribution, failure taxonomy
+- Languages: Python (agent and training), GDScript (Godot games)
+- RL frameworks: Stable-Baselines3 or CleanRL (whichever lands first in H1)
+- Perception: state observations first, pixel observations only after the state-based loop is reliable
+- Logging: structured NDJSON, deterministic seeds
+- Evaluation: training curves, reward, episode length, action distribution, failure taxonomy
 
 ## Repo Architecture
 
@@ -43,59 +54,70 @@ C:\Projects\Sight\
   docs\       sight-charter.md, sight-handoff.md, ethics.md
   src\
     capture\       screen/state capture
-    perception\    CV and optional vision model
+    perception\    CV and optional small vision model
     policy\        decision logic
     controller\    action execution
     logger\        event recording
-    evaluator\     metrics and charts
-    council\       optional deliberation (phase 2+)
+    evaluator\     metrics
+    rl\            RL training loops, env adapters (added in H1+)
   tests\
-  games\      Godot micro-games (separate subprojects)
-  runs\       episode artifacts
+  games\      Godot microgames (separate subprojects)
+  runs\       episode and training artifacts
   CONTRIBUTING.md, LICENSE, README.md
 ```
 
 ## Roles
 
 - GPT: plans, researches, drives technical direction
-- Claude: executes, revises GPT, vetoes on evidence grounds, owns end-of-round commit + handoff update
-- Grok: pulled for (a) unresolved GPT/Claude disagreement after 2 rounds, (b) domains where both are weak (RL internals, Godot specifics, CV tradeoffs on low-spec hardware), (c) phase-gate sanity checks
-- Jeff: relays, synthesizes, ground-truth backstop, decides on direction, approvals, and anything touching supervision
-## Phase Gates (90 days)
+- Claude: executes, revises GPT, vetoes on evidence grounds, owns end-of-round commit and handoff update
+- Grok: pulled for unresolved GPT/Claude disagreement after 2 rounds, weak-domain questions (RL internals, Godot specifics, low-spec hardware tradeoffs), and phase-gate sanity checks
+- Jeff: relays, decides direction, approvals, anything touching supervision, money, legal, IP, or new target environments
 
-- P1 (days 1-14): Godot game chosen; repo scaffolded with charter and ethics
-- P2 (days 15-30): Minimal agent loop (capture -&gt; rules -&gt; controller -&gt; logger)
-- P3 (days 31-45): Measurement layer (evaluator, failure taxonomy)
-- P4 (days 46-60): Progression video series launched; 2-3 milestones published
-- P5 (days 61-75): Dashboard / replay tool (QA-harness shape)
-- P6 (days 76-90): Product decision (SaaS, contract pitch, or both)
+## Phase Gates (hobby track)
+
+Phases gate on technical readiness, not calendar days.
+
+- H1: local RL baseline on Gymnasium CartPole using Stable-Baselines3 or CleanRL with NDJSON training-metric logging
+- H2: reusable training and eval harness with deterministic seeds, NDJSON logs, reproducible from a config file
+- H3: tiny Godot environment exposed as a Gym-style env with state observations only, no pixels
+- H4: pixel observations on the same Godot environment, small CNN policy
+- H5: evaluate the small CNN policy on Signal Dodge or its successor microgame
 
 Each gate: Grok sanity check before proceeding.
 
-## Future target: timer-economy macro sandbox
+## Disallowed Phase Gates (former product track, now dead)
 
-Once the agent loop, live harness, and measurement layer are reliable, Sight should add a custom or local strategy environment modeled on the planning shape of timer and macro games. Target gameplay shape includes building timers, unit queues, resource constraints, upgrades, army and unit composition, XP and general/commander progression, recurring events, and many low-stakes repeated action choices. The purpose is to evaluate long-horizon prioritization, queue management, and opportunity-cost reasoning, not live-service automation. This target stays inside the ethics boundary above. Custom Godot or local sandbox first, or open-source and otherwise permitted environments only. No live commercial games, no ToS-prohibited automation, no bot-detection evasion, no Freecash/offerwall work, no account farming, and no live-service cheat-pipeline assets.
+The original P4-P6 gates are retired. They are listed here so they cannot quietly return:
+
+- Progression video series as a substitute for measurement or buyer evidence
+- Dashboard or replay tool framed as a QA harness or product surface
+- Product, SaaS, or contract decision
+- Buyer discovery, lived-use studies, or any external-validation gate predicated on a paying customer or budget holder
+
+If a future Jeff wants to revive a product track, that is a separate decision under a separate charter. The hobby charter does not reserve that path.
 
 ## Success Criteria
 
-- Technical: working agent loop on &gt;=1 Godot game with reliable measurement
-- Content: 3+ published progression videos with coherent narrative
-- Product shape: at least one of {paying customer, signed contract, serious inbound interest}
+- Working RL baseline on at least one Gymnasium environment with reproducible logs
+- Working RL training loop on at least one custom Godot environment owned by this repo
+- A small policy that learns on Signal Dodge or its successor microgame
+- Ethical posture intact across every iteration
 
 ## Decision Authority
 
-- Jeff-only: direction, first commit approval, first public release, anything touching supervision, money/legal/IP
-- GPT+Claude consensus: technical implementation, phase tactics, tooling
+- Jeff-only: direction, scope changes, anything touching supervision, money, legal, IP, target-environment additions
+- GPT and Claude consensus: technical implementation, phase tactics, tooling
 - Claude-only within charter: execution, cleanup, routine commits on already-approved work
 
 ## Handoff Protocol
 
 - Canonical handoff: `C:\Projects\Sight\docs\sight-handoff.md`
-- Structure: phase | last commit | current task | next action | blockers | &lt;=5 notes
+- Structure: phase | last commit | current task | next action | blockers | notes (max 5)
 - Updated at end of every session by whoever executed
-- Target: 10-minute cold-start resume
+- Target cold-start resume time: 10 minutes
 
 ## Status
 
-- Draft written by Claude (web) 2026-04-23
-- Pending: GPT stress-test, convergence, first commit by Sight-project Claude
+- Recharter from product track to hobby and research lab on 2026-04-29
+- Pre-pivot product-era WIP (~696 line uncommitted Python harness slice from prior session) preserved on branch `pivot-preserve-p3-wip` at commit `a29beb3`, marked unverified
+- Pivot lands on branch `pivot/hobby-rl-lab` for review before any merge to main
