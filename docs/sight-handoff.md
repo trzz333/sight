@@ -6,7 +6,7 @@ Canonical handoff document. Updated at the end of every session by whoever execu
 
 **Phase:** pivot to hobby RL/game-agent lab. Pivot branch `pivot/hobby-rl-lab` open from main at 2b08a0b. Main untouched. Pre-pivot Python harness WIP preserved unverified on `pivot-preserve-p3-wip` at a29beb3.
 
-**Last commit:** PENDING_PIVOT_COMMIT on pivot/hobby-rl-lab. Pre-pivot WIP at a29beb3 on pivot-preserve-p3-wip. Main still at 2b08a0b handoff: P3 GDScript foundation slice landed.
+**Last commit:** ef40f43 on pivot/hobby-rl-lab. Pre-pivot WIP at a29beb3 on pivot-preserve-p3-wip. Main still at 2b08a0b handoff: P3 GDScript foundation slice landed.
 
 **Current task:** Recharter Sight from product track to hobby and research lab. Done on this branch: charter rewritten with hobby-track mission, H1-H5 phase plan, expanded non-goals (offerwalls, Freecash, bot-detection evasion, account farming, online multiplayer, live-service games, proprietary commercial games until explicit legal/ToS posture verified), 64 GB RAM weaker-GPU hardware profile, retired P4-P6 product gates listed explicitly so they cannot quietly return. Handoff rewritten to match.
 
