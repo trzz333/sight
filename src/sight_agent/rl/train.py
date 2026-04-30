@@ -1,10 +1,22 @@
-"""H1 CartPole PPO local baseline trainer.
+"""Sight RL trainer (H1 baseline + H2 reusable harness).
 
 Run:
-    python -m sight_agent.rl.train --config configs/rl/cartpole_ppo_h1.yaml
+    python -m sight_agent.rl.train --config configs/rl/cartpole_ppo_h2.yaml
 
-Writes NDJSON events and summary.json under runs/rl/<run.name>/<run_id>/.
-No TensorBoard, no W&B, no network services. CPU only by default.
+H2 changes vs H1:
+- env and algo construction routed through ``factories.make_env`` /
+  ``factories.make_algo`` (rejects unsupported framework/algo with clear
+  errors; H3 will add a Godot env-builder branch behind the same seam).
+- run-artifact paths centralized in ``artifacts``.
+- summary.json gains: ``schema_version=2``, ``config_path``, ``config_hash``,
+  ``artifact_paths`` (events, summary, config_effective, model), and the
+  saved model path.
+- model checkpoint persisted as ``model.zip`` when ``checkpoint.enabled``.
+- effective config snapshotted to ``config_effective.yaml`` next to the
+  artifacts.
+
+H1 NDJSON event schema (run_start, train_metrics, eval, run_end) is
+preserved unchanged. No TensorBoard, no W&B, no network services. CPU only.
 """
 
 from __future__ import annotations
@@ -19,12 +31,19 @@ from typing import Any
 
 import numpy as np
 import torch
-from stable_baselines3 import PPO
 from stable_baselines3.common.logger import HumanOutputFormat, Logger
 
+from .artifacts import (
+    TrainArtifacts,
+    build_run_id,
+    compute_config_hash,
+    is_checkpoint_enabled,
+    prepare_train_artifacts,
+    write_config_effective,
+)
 from .callbacks import NDJSONCallback, NDJSONKVWriter, introspect_effective_hyperparams
 from .config import apply_cli_overrides, load_config
-from .envs import make_eval_env, make_train_env, smoke_check_env
+from .factories import make_algo, make_env, smoke_check_env
 from .ndjson_logger import NDJSONLogger, get_short_git_commit
 
 
@@ -53,18 +72,10 @@ def _repo_root_from_here() -> Path:
     return Path(__file__).resolve().parents[3]
 
 
-def _build_run_id(name: str, seed: int, override: str | None, git_commit: str | None) -> str:
-    if override:
-        return override
-    ts = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
-    git_part = git_commit or "nogit"
-    return f"{ts}_{name}_seed{seed}_{git_part}"
-
-
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="sight_agent.rl.train",
-        description="Sight H1 CartPole PPO local baseline (NDJSON logging).",
+        description="Sight RL trainer (H1 + H2 harness, NDJSON logging).",
     )
     parser.add_argument("--config", required=True, help="Path to YAML config.")
     parser.add_argument("--seed", type=int, default=None)
@@ -93,7 +104,7 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def run(cfg: dict[str, Any], config_path: str = "<inline>") -> int:
-    """Execute one H1 training run from a (validated) config dict."""
+    """Execute one training run from a (validated) config dict."""
     seed = int(cfg["run"]["seed"])
     _set_global_seeds(seed)
 
@@ -108,25 +119,21 @@ def run(cfg: dict[str, Any], config_path: str = "<inline>") -> int:
     eval_freq = int(cfg["eval"]["eval_freq"])
     n_eval_episodes = int(cfg["eval"]["n_eval_episodes"])
     deterministic_eval = bool(cfg["eval"]["deterministic"])
-
-    if algo_name != "PPO" or framework != "stable-baselines3":
-        raise ValueError(
-            f"H1 only supports PPO + stable-baselines3, got {framework}/{algo_name}",
-        )
+    phase = cfg["run"]["phase"]
+    checkpoint_enabled = is_checkpoint_enabled(cfg)
 
     git_commit = get_short_git_commit(_repo_root_from_here())
     run_id_override = cfg["run"].get("run_id_override")
-    run_id = _build_run_id(cfg["run"]["name"], seed, run_id_override, git_commit)
+    run_id = build_run_id(cfg["run"]["name"], seed, run_id_override, git_commit)
 
-    out_root = Path(cfg["run"]["out_dir"]) / cfg["run"]["name"] / run_id
-    out_root.mkdir(parents=True, exist_ok=True)
-    events_path = out_root / "events.ndjson"
-    summary_path = out_root / "summary.json"
+    artifacts: TrainArtifacts = prepare_train_artifacts(cfg, run_id)
+    write_config_effective(artifacts.config_effective_path, cfg)
+    config_hash = compute_config_hash(cfg)
 
     ndjson = NDJSONLogger(
-        path=events_path,
+        path=artifacts.events_path,
         run_id=run_id,
-        phase=cfg["run"]["phase"],
+        phase=phase,
         env_id=env_id,
         algo=algo_name,
         framework=framework,
@@ -137,34 +144,44 @@ def run(cfg: dict[str, Any], config_path: str = "<inline>") -> int:
     versions = _versions()
     obs_shape, action_n = smoke_check_env(env_id, seed)
 
-    train_env = make_train_env(env_id, n_envs=n_envs, seed=seed)
-    eval_env = make_eval_env(env_id, seed=seed)
+    train_env = make_env(env_id, n_envs=n_envs, seed=seed, mode="train")
+    eval_env = make_env(env_id, n_envs=1, seed=seed, mode="eval")
 
-    model_kwargs: dict[str, Any] = {
-        "policy": policy,
-        "env": train_env,
-        "seed": seed,
-        "device": device,
-    }
-    if extra_hyperparams:
-        model_kwargs.update(extra_hyperparams)
-    model = PPO(**model_kwargs)
+    model = make_algo(
+        framework=framework,
+        name=algo_name,
+        policy=policy,
+        device=device,
+        hyperparams=extra_hyperparams,
+        env=train_env,
+        seed=seed,
+    )
 
     sb3_logger = Logger(
-        folder=str(out_root),
+        folder=str(artifacts.run_dir),
         output_formats=[HumanOutputFormat(sys.stdout), NDJSONKVWriter(ndjson)],
     )
     model.set_logger(sb3_logger)
 
     effective = introspect_effective_hyperparams(model)
+    artifact_paths_for_events = {
+        "events_ndjson": str(artifacts.events_path),
+        "summary_json": str(artifacts.summary_path),
+        "config_effective": str(artifacts.config_effective_path),
+    }
+    if checkpoint_enabled:
+        artifact_paths_for_events["model"] = str(artifacts.model_path)
+
     ndjson.log_event(
         "run_start",
         step=0,
         config_path=str(config_path),
+        config_hash=config_hash,
         config=cfg,
         versions=versions,
         env_smoke={"obs_shape": list(obs_shape), "action_n": action_n},
         effective_hyperparams=effective,
+        artifact_paths=artifact_paths_for_events,
         provenance_note=(
             "Library defaults are runtime-introspected from installed packages; "
             "no web-verified claims."
@@ -177,10 +194,7 @@ def run(cfg: dict[str, Any], config_path: str = "<inline>") -> int:
         eval_freq=eval_freq,
         n_eval_episodes=n_eval_episodes,
         deterministic=deterministic_eval,
-        artifact_paths={
-            "events_ndjson": str(events_path),
-            "summary_json": str(summary_path),
-        },
+        artifact_paths=artifact_paths_for_events,
     )
 
     status = "ok"
@@ -213,10 +227,26 @@ def run(cfg: dict[str, Any], config_path: str = "<inline>") -> int:
         except Exception:  # noqa: BLE001
             pass
 
+    model_path_written: str | None = None
+    if checkpoint_enabled:
+        # SB3's ``model.save`` accepts a path with or without .zip; we keep the
+        # resolved filename from artifacts.
+        model.save(str(artifacts.model_path))
+        model_path_written = str(artifacts.model_path)
+
+    summary_artifact_paths = {
+        "events": str(artifacts.events_path),
+        "summary": str(artifacts.summary_path),
+        "config_effective": str(artifacts.config_effective_path),
+    }
+    if model_path_written:
+        summary_artifact_paths["model"] = model_path_written
+
     summary = {
-        "schema_version": 1,
+        "schema_version": 2,
+        "kind": "train",
         "run_id": run_id,
-        "phase": cfg["run"]["phase"],
+        "phase": phase,
         "env_id": env_id,
         "algo": algo_name,
         "framework": framework,
@@ -226,14 +256,18 @@ def run(cfg: dict[str, Any], config_path: str = "<inline>") -> int:
         "n_eval_episodes": n_eval_episodes,
         "deterministic_eval": deterministic_eval,
         "git_commit": git_commit,
+        "config_path": str(config_path),
+        "config_hash": config_hash,
         "versions": versions,
         "effective_hyperparams": effective,
-        "events_ndjson": str(events_path),
+        "artifact_paths": summary_artifact_paths,
+        # Backward-compat fields used by H1 packet/tests.
+        "events_ndjson": str(artifacts.events_path),
         "status": status,
     }
-    summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
+    artifacts.summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
     ndjson.close()
-    print(f"H1 run complete: {events_path}")
+    print(f"Sight RL run complete ({phase}): {artifacts.events_path}")
     return 0
 
 

@@ -4,20 +4,20 @@ Canonical handoff document. Updated at the end of every session by whoever execu
 
 ---
 
-**Phase:** H2 in progress (uncommitted WIP recovered from prior crashed session, unverified).
+**Phase:** H2 implementation recovered and tests passing. H2 acceptance run, out-of-band eval, fresh-clone repro, and Grok H2 phase-gate packet remain. H2 is not phase-complete. H3 has not started.
 
-**Last commit:** 91009bb docs: handoff for H2 WIP recovery audit (chunk 0)
+**Last commit:** pending (this handoff lands in the same `feat(rl): add H2 reusable train and eval harness` commit)
 
-**Current task:** H2 WIP is intact in the working tree but has zero verification. `src/sight_agent/rl/train.py` is modified (+84 / -50) to route through new `factories` and `artifacts` modules. 7 untracked files add `evaluate.py`, the H2 config, the CPU constraints lockfile, and three new test files. No tests have been run, no eval has been executed. Full byte-preserving backup exists at `C:\Users\maste\AppData\Local\Temp\sight-h2-wip-recovery` including `h2-wip.diff` (9158 B) and copies of all 8 WIP files.
+**Current task:** H2 acceptance train run on `configs/rl/cartpole_ppo_h2.yaml` and the matching out-of-band eval against the resulting checkpoint.
 
-**Next action:** Run `python -m pytest tests/rl -v --tb=short` against the dirty tree at the current HEAD to verify the recovered WIP. If green, branch off as `wip/h2-recovered`, commit, and push; do not commit WIP directly to main. If anything fails, triage per file before resetting.
+**Next action:** Run the H2 acceptance training, then `python -m sight_agent.rl.evaluate --run <run_dir> --n-eval-episodes 5 --seed 0`. Then a fresh-clone repro of the H2 commit. Then build `docs/grok-h2-phase-gate-packet.md`. None of those are in scope for this chunk.
 
-**Blockers:** None technical. Jeff externally relayed Grok H1 final verdict as GREEN; that closure is not yet recorded in any committed Sight doc beyond the existing `docs/grok-h1-yellow-repro.md`. Consider a tiny H1-closure docs commit at the next safe checkpoint.
+**Blockers:** None.
 
 **Notes:**
 
-- Working tree dirty by design. Modified: `src/sight_agent/rl/train.py`. Untracked: `configs/rl/cartpole_ppo_h2.yaml`, `constraints/rl-cpu.txt`, `src/sight_agent/rl/{artifacts,evaluate,factories}.py`, `tests/rl/test_h2_{artifacts,evaluate_smoke,factories}.py`.
-- WIP is internally coherent. `train.py` imports the new modules; `evaluate.py` imports `artifacts` and `factories`; tests import all three. Summary schema bumped to 2 with `kind=train|eval`, `config_hash`, `artifact_paths.model`. H1 backward-compat field `events_ndjson` retained.
-- Backup folder pre-existed with a prior recovery snapshot (`git-status.txt` 19:11, `train.py` 18:32) from before this session. This session's writes did not destroy unique evidence.
-- Conservative reset path also viable. If GPT determines the recovered implementation diverges from the planned H2 spec, `git restore src/sight_agent/rl/train.py && rm` the 7 untracked files. Backup remains.
-- H1 success criteria remain satisfied at `b5b4028`. The handoff schema is the action doc; H1 closure record is a separate decision for GPT/Jeff.
+- 48/48 tests passing in `tests/rl` against the recovered WIP at the HEAD before this commit (`0973d1d`). Telemetry posture verified clean: no TensorBoard, W&B, MLflow, Comet, or network imports anywhere under `src/sight_agent/rl/`.
+- Substantive scope: `train.py` modified to route through new `factories` and `artifacts`, summary schema bumped to 2 with `kind=train|eval`, `config_hash`, `artifact_paths`, model checkpoint when `checkpoint.enabled`. H1 `events_ndjson` field retained for backward compat. New: `configs/rl/cartpole_ppo_h2.yaml`, `constraints/rl-cpu.txt`, `src/sight_agent/rl/{artifacts,evaluate,factories}.py`, `tests/rl/test_h2_{artifacts,evaluate_smoke,factories}.py`, `docs/rl-repro.md`, `docs/grok-h1-final-green.md`.
+- H1 closure documented in `docs/grok-h1-final-green.md` (Grok GREEN, relayed by Jeff). Verbatim Grok text not captured in repo by design.
+- Backup of the pre-commit WIP remains at `C:\Users\maste\AppData\Local\Temp\sight-h2-wip-recovery`. Do not delete without Jeff approval.
+- `constraints/rl-cpu.txt` header text references "H2 acceptance and fresh-clone repro runs" which have not happened yet. Header is forward-looking; will become accurate once those runs land. Flagged here, not edited (chunk-1 scope is implement+test only, no redesign).

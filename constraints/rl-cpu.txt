@@ -1,0 +1,17 @@
+# Sight H2 RL stack constraints (CPU). Captured from the local working
+# environment that produced the H2 acceptance and fresh-clone repro runs.
+# Use with: pip install -e ".[dev]" -c constraints/rl-cpu.txt
+#
+# This is a reproducibility posture, not a universal lock. Same
+# dependency/hardware class -> same trajectories. Different platform or
+# different package versions are explicitly out of scope for bit-for-bit
+# claims.
+stable-baselines3==2.8.0
+gymnasium==1.2.3
+torch==2.11.0
+numpy==2.4.4
+pyyaml==6.0.3
+pytest==9.0.3
+cloudpickle==3.1.2
+typing_extensions==4.15.0
+farama-notifications==0.0.6
