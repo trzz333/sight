@@ -6,7 +6,7 @@ Canonical handoff document. Updated at the end of every session by whoever execu
 
 **Phase:** H2 in progress (uncommitted WIP recovered from prior crashed session, unverified).
 
-**Last commit:** REPLACE_HASH REPLACE_SUBJECT
+**Last commit:** 91009bb docs: handoff for H2 WIP recovery audit (chunk 0)
 
 **Current task:** H2 WIP is intact in the working tree but has zero verification. `src/sight_agent/rl/train.py` is modified (+84 / -50) to route through new `factories` and `artifacts` modules. 7 untracked files add `evaluate.py`, the H2 config, the CPU constraints lockfile, and three new test files. No tests have been run, no eval has been executed. Full byte-preserving backup exists at `C:\Users\maste\AppData\Local\Temp\sight-h2-wip-recovery` including `h2-wip.diff` (9158 B) and copies of all 8 WIP files.
 
