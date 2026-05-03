@@ -4,23 +4,23 @@ Canonical handoff document. Updated at the end of every session by whoever execu
 
 ---
 
-**Phase:** H2 (implementation pushed; acceptance, out-of-band eval, fresh-clone repro, and Grok H2 packet pending). H3 not started.
+**Phase:** H2 (closure pending Grok phase-gate review). H3 not started.
 
-**Last commit:** ebb89b4 feat(rl): add H2 reusable train and eval harness
+**Last commit:** c73212b docs(h2): add Grok H2 phase-gate review packet
 
-**Current task:** H2 acceptance run, then matching out-of-band eval, then fresh-clone repro, then build `docs/grok-h2-phase-gate-packet.md`. None of those are done. Implementation and tests are in. An untracked draft of the Grok packet exists in the working tree but has not been committed.
+**Current task:** Grok H2 phase-gate review of `docs/grok-h2-phase-gate-packet.md`. Acceptance run, out-of-band eval, fresh-clone repro, and packet drafting are all complete; the packet is now committed on main.
 
-**Next action:** Run H2 acceptance: `python -m sight_agent.rl.train --config configs/rl/cartpole_ppo_h2.yaml`.
+**Next action:** Jeff relays `docs/grok-h2-phase-gate-packet.md` to Grok with a GREEN / YELLOW / RED ask. On GREEN: record verdict in `docs/grok-h2-final-green.md` (H1 pattern), update handoff to phase H3, begin H3 (tiny Godot env, state observations only, no pixels). On YELLOW: address caveats then resubmit.
 
 **Blockers:**
 
-- Claude Desktop GPU/driver crash environment on Jeff's primary box. Intel iGPU has fallen back to Microsoft Basic Display Adapter; Intel 31.0.101.2115 was crashing pre-fallback. Decision pending from Jeff: install Intel 31.0.101.2140 elevated, source 26.20.100.7642 base package, or run Claude Desktop with `--disable-gpu`. Detail in `C:\Projects\ops\claude-desktop-crash-ledger.md`.
-- Untracked `docs/grok-h2-phase-gate-packet.md` in working tree from a prior session. Decide whether to commit, edit, or discard before resuming H2 acceptance.
+- Claude Desktop GPU/driver crash on Jeff's primary box (Intel iGPU dropped to Microsoft Basic Display Adapter; 31.0.101.2115 was crashing pre-fallback). Tracked in `C:\Projects\ops\claude-desktop-crash-ledger.md`. Does not block H2 evidence — this session ran on standalone DC remote MCP (deviceId 64416a67-1bdb-42fc-bf1a-48f988e6901d).
+- Untracked artifacts in working tree from H2 closure work: `scripts/h2_close_recovery.ps1` (recovery harness, 430 lines), `train_out.txt`, `eval_out.txt`, `pytest_out.txt` (May-01 supplemental run console output). Decide commit/discard at GPT direction; not required for Grok review since the packet stands on its own evidence.
 
 **Notes:**
 
-- 48/48 tests passing in `tests/rl` against `ebb89b4`. Telemetry posture verified clean: no TensorBoard, W&B, MLflow, Comet, or network imports anywhere under `src/sight_agent/rl/`.
-- Substantive scope: `train.py` modified to route through new `factories` and `artifacts`, summary schema bumped to 2 with `kind=train|eval`, `config_hash`, `artifact_paths`, model checkpoint when `checkpoint.enabled`. H1 `events_ndjson` field retained for backward compat.
-- H1 closure documented in `docs/grok-h1-final-green.md` (Grok GREEN, relayed by Jeff). Verbatim Grok text not captured in repo by design.
-- Backup of the pre-commit WIP remains at `C:\Users\maste\AppData\Local\Temp\sight-h2-wip-recovery`. Do not delete without Jeff approval.
-- `constraints/rl-cpu.txt` header references "H2 acceptance and fresh-clone repro runs" which have not happened yet. Forward-looking. One-line header tweak when chunk-2 commits land.
+- 48/48 tests pass on HEAD via `pytest tests/rl` (last captured 2026-05-01 in `pytest_out.txt`). Telemetry posture clean.
+- Canonical H2 acceptance run: `runs\rl\cartpole_ppo_h2\h2_acceptance_seed0\` at `git_commit=83d944a`, `config_hash=ebc3...d193`, `total_timesteps=25000`, deterministic eval, final mean_reward=500.0, trajectory `[5000:468.4, 10000:457.2, 15000:228.2, 20000:453.4, 25000:500.0]`.
+- Out-of-band eval at `runs\rl\cartpole_ppo_h2\h2_acceptance_seed0\evals\eval_20260430T134046Z_seed0_n5_nceseed0\`: status=ok, mean_reward=500.0, episode_rewards=[500.0]*5.
+- Fresh-clone repro of `83d944a` was captured 2026-04-30 in `%TEMP%\sight-h2-fresh-repro-83d944a` (trajectories match at eval-checkpoint resolution; temp dir since cleaned by Windows). Independent corroboration: `scripts/h2_close_recovery.ps1` ran 2026-05-01 11:42Z with selectedTrain `20260430T211907Z_cartpole_ppo_h2_seed0_6ff432a`, fresh-clone resolved commit `6ff432a`, train/eval status=ok, mean_reward=500.0, trajectory_match_at_checkpoints=true, errors_count=0; logs at `.tmp\h2-close-logs\20260501T114212Z\summary.json`.
+- HEAD progression since canonical run: `83d944a` -> `6ff432a` -> `c73212b`. The two pre-packet commits (`83d944a`, `6ff432a`) are doc-only chores; `git diff 83d944a..6ff432a -- ":(exclude)docs"` is empty.
