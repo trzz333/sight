@@ -4,22 +4,23 @@ Canonical handoff document. Updated at the end of every session by whoever execu
 
 ---
 
-**Phase:** H3 implementation. Implementation Sequence step 1 (protocol constants) complete. Section 10 acceptance criteria amended pre-step-1 to formalize the 10 technical gates vs 3 closure checks split (closure of the flag carried in the previous handoff).
+**Phase:** H3 implementation. Implementation Sequence step 2 (Godot bidirectional protocol plumbing) complete in tcp_controller.gd. Step 3 (Signal Dodge soft reset in main.gd) is next.
 
-**Last commit:** `b61aefc` docs(h3): clarify acceptance gates and fallback authorization
+**Last commit:** `f03aa1c` feat(godot): H3 step 2 bidirectional protocol plumbing in tcp_controller.gd
 
-**Current task:** H3 step 1 closed. Ready for step 2 of `docs/sight-h3-plan.md` Implementation Sequence.
+**Current task:** H3 step 2 closed. Ready for step 3 of `docs/sight-h3-plan.md` Implementation Sequence.
 
-**Next action:** Step 2: extend `games/signal-dodge/scripts/tcp_controller.gd` to parse `reset` and `step` requests and emit `reset_ok`, `step_result`, and `error` responses. New listener path keys on `protocol_version` (H3_PROTOCOL_VERSION=2). Legacy hello (field `protocol`) on the H3 listener path should produce an `error` with code `protocol_version_mismatch`. Plan section 7 has full request/response field lists; `src/sight_agent/protocol.py` REQUIRED_FIELDS_* sets are the authoritative field contract.
+**Next action:** Step 3: implement in-process soft reset in `games/signal-dodge/scripts/main.gd` per plan Decision 2 (clear hazards, reset frame counter, reset death state, reset score/survival, reposition player, reseed Godot RNG from the Python-provided episode seed, return initial observation). Step 3 must also resolve the latent main.gd parse error blocker (see notes) before any Godot-side validation can run. Plan section 7 has the full request/response field lists; tcp_controller.gd public API in step 2 (`mode()`, `has_pending_h3_request()`, `take_pending_h3_request()`, `send_reset_ok()`, `send_step_result()`, `send_error()`) is the seam main.gd will consume.
 
 **Blockers:**
 
+- Latent `main.gd` parse error blocking Godot 4.6.2 parse validation of the project. Lines 110 and 118 fail `Cannot infer the type of "ac"/"rid"` against the new Godot 4.6.2 stricter type inference (`var ac := _tcp.applied_count()` and `var rid := _tcp.run_id()` cannot infer type because `_tcp` is declared as untyped Variant). Pre-existing, unrelated to step 2, but blocks any headless Godot project parse. Must be resolved at the start of step 3 before live validation, e.g. by typing `_tcp` properly or by giving these vars explicit type annotations.
 - Claude Desktop GPU/driver crash on Jeff's primary box. Tracked in `C:\Projects\ops\claude-desktop-crash-ledger.md`. Operational only, not Sight evidence blocker. Sight sessions run on standalone DC remote MCP (deviceId 64416a67-1bdb-42fc-bf1a-48f988e6901d).
 
 **Notes:**
 
-- H3 plan Section 10 amendment landed as `22cf0e2`. Pruning to 10 technical gates + 3 closure checks closes the flag carried in the previous handoff.
-- `src/sight_agent/protocol.py` is constants only: no parsing, no transport, no tests of its own. Steps 2 (Godot) and 5 (Python transport) will exercise it. Smoke import + assertion check passed; tests/rl 48 passed unchanged.
-- `H3_PROTOCOL_VERSION=2` with field name `protocol_version`. Legacy controller stays at `sight_agent.constants.PROTOCOL_VERSION=1` with field `protocol`. Field-name divergence is the intentional tripwire against accidental cross-mode hellos on the same Godot listener.
-- Active runtime gate still in force per plan section "Claude execution boundary" and now formalized in plan section "Fallback authorization" (`b61aefc`): NDJSON log-tailing and subprocess-per-episode each require specific minimum evidence before GPT can consider authorizing; subprocess fallback also requires an explicit acceptance-criteria patch.
-- HEAD progression this round: `fafa460` -> `22cf0e2` (acceptance split) -> `ab4f76e` (protocol module) -> `dfb50a4` (handoff refresh) -> `b61aefc` (fallback authorization) -> handoff hash refresh (this commit).
+- Step 2 mode-dispatch design per GPT directive: single listener, mode tripwire (`MODE_UNSET` -> `MODE_LEGACY` | `MODE_H3`) locks on first class-identifying field. Cross-mode rejection: legacy `protocol` field in H3 mode produces `error protocol_version_mismatch`; H3 `protocol_version` field in legacy mode is logged and dropped (legacy channel has no response surface). Pipeline overrun (second pending request before main.gd consumes) produces `error bad_request`. Legacy v1 hello/action path preserved verbatim.
+- Step 2 introduces only protocol plumbing: `hello`, `reset`, `step` request parsing, field validation, discrete-action validation, single pending request slot, and `reset_ok` / `step_result` / `error` response helpers. No soft reset, no observation builder, no Python transport per directive scope.
+- Validation gate: `pytest tests/rl -v --tb=short` 48 passed (baseline unchanged - step 2 adds no Python tests). Python protocol smoke import + key-constant assertions PASS. Godot-side parse validation deferred to step 3 because of the main.gd blocker above.
+- `H3_PROTOCOL_VERSION=2` literal duplicated in tcp_controller.gd (mirrors src/sight_agent/protocol.py); the Python module remains the authoritative contract. Drift between the two is a bug.
+- HEAD progression this round: `f3bb57e` (handoff hash) -> `f03aa1c` (H3 step 2 code) -> handoff hash refresh (this commit).
