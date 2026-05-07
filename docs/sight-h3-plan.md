@@ -662,3 +662,47 @@ Implement the smallest H3 env boundary that satisfies this plan.
 If implementation pressure pushes toward broader cleanup, stop and report instead of expanding scope.
 
 If bidirectional TCP or soft reset proves materially harder than expected, report the smallest failing point and propose the fallback. Do not silently switch to NDJSON tailing or subprocess-per-episode.
+
+## Fallback authorization
+
+Claude may not silently switch from bidirectional TCP to NDJSON log-tailing, or from in-process soft reset to subprocess-per-episode reset.
+
+### NDJSON log-tailing fallback
+
+Default posture: not authorized for H3 close.
+
+Minimum evidence required before GPT can consider it:
+
+1. Show the smallest failing TCP point:
+   - exact message attempted
+   - exact Godot-side handler state
+   - exact Python exception or timeout
+   - whether `hello`, `reset`, or `step` is the failing edge
+2. Show that the failure is structural, not a sequencing bug, port conflict, buffering mistake, missing newline, or ordinary implementation friction.
+3. Provide a bounded fallback design where:
+   - Gym `step()` still returns from deterministic frame/seq-correlated evidence
+   - logs include request seq, response seq, frame, action, obs, reward, terminal flags
+   - no polling ambiguity exists when multiple events arrive in one read
+   - timeout behavior is explicit
+   - malformed or missing events raise exceptions rather than fake terminal states
+
+Even if authorized, NDJSON log-tailing is diagnostic only unless GPT explicitly amends H3 acceptance.
+
+### Subprocess-per-episode fallback
+
+Default posture: possible only with explicit GPT plan amendment.
+
+Minimum evidence required before GPT can consider it:
+
+1. Show why soft reset is materially harder:
+   - specific Godot state coupling
+   - hazards/player/frame/death/seed reset path identified
+   - what breaks after attempted reset
+   - why fixing it would require broad game refactor rather than a small reset method
+2. Show that subprocess reset preserves Gym semantics:
+   - `env.reset(seed=...)` launches or relaunches cleanly
+   - initial observation is returned through TCP, not logs
+   - `step()` remains bidirectional TCP
+   - same seed plus same scripted action rollout is reproducible on the same machine
+   - child process cleanup is reliable after normal timeout, collision, close, and exception
+3. Propose the exact acceptance-criteria patch needed.
