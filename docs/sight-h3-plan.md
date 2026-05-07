@@ -568,7 +568,7 @@ H3 artifact metadata must include:
 
 ## 10. Acceptance criteria for H3 close
 
-H3 is GREEN only if all are true:
+H3 technical acceptance is GREEN only if all are true:
 
 1. `GodotSignalDodgeEnv` exists under `src/sight_agent/rl/godot_env.py`
 2. factory seam constructs it through `env.id="godot:signal-dodge-v0"`
@@ -586,17 +586,15 @@ H3 is GREEN only if all are true:
    - Godot NDJSON
    - config copy or config hash
    - run metadata
-11. no network telemetry added
-12. no pixel path used
-13. no commercial or platform automation scope added
-14. H3 phase-gate packet is written using the H2 packet pattern
-15. handoff is updated with:
-   - phase
-   - last commit
-   - current task
-   - next action
-   - blockers
-   - no more than five notes
+
+Required closure checks, not technical acceptance criteria:
+
+1. Charter invariants are explicitly checked in the H3 phase-gate packet:
+   - no network telemetry added
+   - no pixel path used
+   - no commercial or platform automation scope added
+2. H3 phase-gate packet is written using the H2 packet pattern.
+3. `docs/sight-handoff.md` is updated with phase, last commit, current task, next action, blockers, and no more than five notes.
 
 ## Non-goals
 
