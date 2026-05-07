@@ -6,7 +6,7 @@ Canonical handoff document. Updated at the end of every session by whoever execu
 
 **Phase:** H3 implementation. Implementation Sequence step 1 (protocol constants) complete. Section 10 acceptance criteria amended pre-step-1 to formalize the 10 technical gates vs 3 closure checks split (closure of the flag carried in the previous handoff).
 
-**Last commit:** `ab4f76e` feat(rl): add H3 protocol constants module
+**Last commit:** `b61aefc` docs(h3): clarify acceptance gates and fallback authorization
 
 **Current task:** H3 step 1 closed. Ready for step 2 of `docs/sight-h3-plan.md` Implementation Sequence.
 
@@ -21,5 +21,5 @@ Canonical handoff document. Updated at the end of every session by whoever execu
 - H3 plan Section 10 amendment landed as `22cf0e2`. Pruning to 10 technical gates + 3 closure checks closes the flag carried in the previous handoff.
 - `src/sight_agent/protocol.py` is constants only: no parsing, no transport, no tests of its own. Steps 2 (Godot) and 5 (Python transport) will exercise it. Smoke import + assertion check passed; tests/rl 48 passed unchanged.
 - `H3_PROTOCOL_VERSION=2` with field name `protocol_version`. Legacy controller stays at `sight_agent.constants.PROTOCOL_VERSION=1` with field `protocol`. Field-name divergence is the intentional tripwire against accidental cross-mode hellos on the same Godot listener.
-- Active runtime gate still in force per plan section "Claude execution boundary": no silent fallback to NDJSON log-tailing or subprocess-per-episode if bidirectional TCP or soft reset proves harder than expected.
-- HEAD progression this round: `fafa460` -> `22cf0e2` (plan amendment) -> `ab4f76e` (protocol module) -> handoff refresh (this commit).
+- Active runtime gate still in force per plan section "Claude execution boundary" and now formalized in plan section "Fallback authorization" (`b61aefc`): NDJSON log-tailing and subprocess-per-episode each require specific minimum evidence before GPT can consider authorizing; subprocess fallback also requires an explicit acceptance-criteria patch.
+- HEAD progression this round: `fafa460` -> `22cf0e2` (acceptance split) -> `ab4f76e` (protocol module) -> `dfb50a4` (handoff refresh) -> `b61aefc` (fallback authorization) -> handoff hash refresh (this commit).
