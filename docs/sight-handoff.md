@@ -4,13 +4,13 @@ Canonical handoff document. Updated at the end of every session by whoever execu
 
 ---
 
-**Phase:** H3 implementation. H2 closed GREEN by Grok phase-gate review on 2026-05-03; closure recorded in `docs/grok-h2-final-green.md`. H3 plan authored by GPT and committed at `docs/sight-h3-plan.md`; "no Godot harness code before GPT-authored plan" gate cleared.
+**Phase:** H3 implementation. Implementation Sequence step 1 (protocol constants) complete. Section 10 acceptance criteria amended pre-step-1 to formalize the 10 technical gates vs 3 closure checks split (closure of the flag carried in the previous handoff).
 
-**Last commit:** `986276b` docs(h3): add GPT-authored H3 plan for Godot Signal Dodge Gym env
+**Last commit:** `ab4f76e` feat(rl): add H3 protocol constants module
 
-**Current task:** Begin H3 implementation per `docs/sight-h3-plan.md` Implementation Sequence (steps 1 through 15). Step 1 is "Add protocol notes or constants for H3 message types."
+**Current task:** H3 step 1 closed. Ready for step 2 of `docs/sight-h3-plan.md` Implementation Sequence.
 
-**Next action:** Inspect existing transport surface in `src/sight_agent/` and Godot TCP controller in `games/signal-dodge` to ground step 1. Add a protocol constants module covering `hello`, `reset`, `step`, error response, and `protocol_version` literal.
+**Next action:** Step 2: extend `games/signal-dodge/scripts/tcp_controller.gd` to parse `reset` and `step` requests and emit `reset_ok`, `step_result`, and `error` responses. New listener path keys on `protocol_version` (H3_PROTOCOL_VERSION=2). Legacy hello (field `protocol`) on the H3 listener path should produce an `error` with code `protocol_version_mismatch`. Plan section 7 has full request/response field lists; `src/sight_agent/protocol.py` REQUIRED_FIELDS_* sets are the authoritative field contract.
 
 **Blockers:**
 
@@ -18,8 +18,8 @@ Canonical handoff document. Updated at the end of every session by whoever execu
 
 **Notes:**
 
-- H3 plan committed as `986276b`. GPT authored 15 acceptance criteria; only items 1 through 10 are substantive technical gates. Items 11 through 13 restate charter invariants; items 14 and 15 are process artifacts. Pruning to 10 technical gates flagged for phase-gate-packet review.
-- H3 runtime constraint: no silent fallback to NDJSON log-tailing or subprocess-per-episode if bidirectional TCP or soft reset proves harder than expected. Fallbacks require explicit GPT authorization per plan section "Claude execution boundary."
-- H2 GREEN closure intact: 48/48 tests passing, acceptance + OOB eval + fresh-clone repro all clean. H2 substantive commit `ebb89b4`. Caveats in `docs/grok-h2-final-green.md`.
-- HEAD progression through H2 close into H3: `ebb89b4` -> `83d944a` -> `6ff432a` -> `c73212b` -> `ecf21fd` -> `19b8bc2` (H2 closure) -> `986276b` (H3 plan) -> handoff refresh (this round).
-- Repo `https://github.com/trzz333/sight.git`, branch `main`, fully pushed.
+- H3 plan Section 10 amendment landed as `22cf0e2`. Pruning to 10 technical gates + 3 closure checks closes the flag carried in the previous handoff.
+- `src/sight_agent/protocol.py` is constants only: no parsing, no transport, no tests of its own. Steps 2 (Godot) and 5 (Python transport) will exercise it. Smoke import + assertion check passed; tests/rl 48 passed unchanged.
+- `H3_PROTOCOL_VERSION=2` with field name `protocol_version`. Legacy controller stays at `sight_agent.constants.PROTOCOL_VERSION=1` with field `protocol`. Field-name divergence is the intentional tripwire against accidental cross-mode hellos on the same Godot listener.
+- Active runtime gate still in force per plan section "Claude execution boundary": no silent fallback to NDJSON log-tailing or subprocess-per-episode if bidirectional TCP or soft reset proves harder than expected.
+- HEAD progression this round: `fafa460` -> `22cf0e2` (plan amendment) -> `ab4f76e` (protocol module) -> handoff refresh (this commit).
