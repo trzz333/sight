@@ -4,13 +4,13 @@ Canonical handoff document. Updated at the end of every session by whoever execu
 
 ---
 
-**Phase:** H3 starting. H2 closed GREEN by Grok phase-gate review on 2026-05-03; closure recorded in `docs/grok-h2-final-green.md`.
+**Phase:** H3 implementation. H2 closed GREEN by Grok phase-gate review on 2026-05-03; closure recorded in `docs/grok-h2-final-green.md`. H3 plan authored by GPT and committed at `docs/sight-h3-plan.md`; "no Godot harness code before GPT-authored plan" gate cleared.
 
-**Last commit:** pending closure commit
+**Last commit:** `986276b` docs(h3): add GPT-authored H3 plan for Godot Signal Dodge Gym env
 
-**Current task:** H3 planning. H3 scope per charter is a tiny Godot environment exposed as a Gym-style env with state observations only, no pixels.
+**Current task:** Begin H3 implementation per `docs/sight-h3-plan.md` Implementation Sequence (steps 1 through 15). Step 1 is "Add protocol notes or constants for H3 message types."
 
-**Next action:** inspect current Godot game and env scaffolding under `games/` and `src/` to ground H3, then propose a minimal H3 slice (env class, observation/action spaces, reward, terminal conditions, smoke test) for GPT review before implementation.
+**Next action:** Inspect existing transport surface in `src/sight_agent/` and Godot TCP controller in `games/signal-dodge` to ground step 1. Add a protocol constants module covering `hello`, `reset`, `step`, error response, and `protocol_version` literal.
 
 **Blockers:**
 
@@ -18,8 +18,8 @@ Canonical handoff document. Updated at the end of every session by whoever execu
 
 **Notes:**
 
-- H2 GREEN closure: all eight H2 charter criteria satisfied, 48/48 tests passing, acceptance + out-of-band eval + fresh-clone repro all clean. Non-blocking caveats (artifact commit hash, config_hash and model.zip drift between acceptance/fresh, mixed schema_version, H1 backward-compat fields) documented in `docs/grok-h2-final-green.md`.
-- H2 substantive commit is `ebb89b4`. Acceptance run `runs\rl\cartpole_ppo_h2\h2_acceptance_seed0\` at `git_commit=83d944a`, final `mean_reward=500.0`, trajectory `[5000:468.4, 10000:457.2, 15000:228.2, 20000:453.4, 25000:500.0]`.
-- H2 closure leftovers (`scripts/h2_close_recovery.ps1`, `train_out.txt`, `eval_out.txt`, `pytest_out.txt`) backed up to `C:\Users\maste\AppData\Local\Temp\sight-h2-closure-leftovers-20260503T144455Z` and removed from working tree.
-- HEAD progression through H2: `ebb89b4` -> `83d944a` -> `6ff432a` -> `c73212b` -> `ecf21fd` (handoff refresh) -> closure commit (this round).
-- Telemetry posture clean. Repo `https://github.com/trzz333/sight.git`, branch `main`, fully pushed.
+- H3 plan committed as `986276b`. GPT authored 15 acceptance criteria; only items 1 through 10 are substantive technical gates. Items 11 through 13 restate charter invariants; items 14 and 15 are process artifacts. Pruning to 10 technical gates flagged for phase-gate-packet review.
+- H3 runtime constraint: no silent fallback to NDJSON log-tailing or subprocess-per-episode if bidirectional TCP or soft reset proves harder than expected. Fallbacks require explicit GPT authorization per plan section "Claude execution boundary."
+- H2 GREEN closure intact: 48/48 tests passing, acceptance + OOB eval + fresh-clone repro all clean. H2 substantive commit `ebb89b4`. Caveats in `docs/grok-h2-final-green.md`.
+- HEAD progression through H2 close into H3: `ebb89b4` -> `83d944a` -> `6ff432a` -> `c73212b` -> `ecf21fd` -> `19b8bc2` (H2 closure) -> `986276b` (H3 plan) -> handoff refresh (this round).
+- Repo `https://github.com/trzz333/sight.git`, branch `main`, fully pushed.
