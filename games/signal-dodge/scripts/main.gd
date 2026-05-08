@@ -16,12 +16,17 @@ const SCREEN_WIDTH := 720
 const HAZARD_SIZE := 24
 const RANDOM_SEED := 42
 
+# H3 step 3 stub. Step 4 replaces these with the real observation builder.
+const H3_OBS_DIM := 10
+const H3_OBS_STUB_REASON := "step_4_observation_builder_pending"
+
 var _frame_counter := 0
 var _run_start_ms: int = 0
 var _alive := true
 var _hazards: Array = []
 var _hazard_id_counter := 0
-var _tcp = null  # tcp_controller.gd instance; kept duck-typed so method calls resolve dynamically
+var _player_start_pos := Vector2.ZERO  # H3 step 3: deterministic player respawn position captured at scene init.
+var _tcp: TCP_CONTROLLER = null  # H3 step 3: typed via preloaded TCP_CONTROLLER script const so Godot 4.6.2 type inference resolves applied_count()/run_id() and the H3 API surface (mode/has_pending_h3_request/take_pending_h3_request/send_reset_ok/send_step_result/send_error). Same nullable runtime semantics as the prior untyped Variant.
 var _tcp_mode := false
 var _tcp_ignore_death := false  # SIGHT_TCP_IGNORE_DEATH=1 + TCP mode: keep the run alive past collision for transport endurance tests. Default false; gameplay unchanged in non-TCP mode.
 # SIGHT_P3_ACTIONS_BUDGET is read once at _ready in TCP mode. Empty/missing/non-positive
@@ -34,6 +39,7 @@ var _actions_budget: int = 0
 
 func _ready() -> void:
 	seed(RANDOM_SEED)
+	_player_start_pos = _player.position
 	_run_start_ms = Time.get_ticks_msec()
 	_tcp_mode = OS.get_environment("SIGHT_TCP_MODE") == "1"
 	_tcp_ignore_death = _tcp_mode and (OS.get_environment("SIGHT_TCP_IGNORE_DEATH") == "1")
@@ -92,6 +98,24 @@ func _physics_process(delta: float) -> void:
 	var perceived := {"threat": false}
 	if _tcp_mode:
 		action = _tcp.poll(_frame_counter)
+		# H3 mode dispatch. tcp_controller.gd parks one validated reset/step request per
+		# tick; we consume it here at the deterministic physics point. Reset performs the
+		# in-process soft reset and short-circuits the rest of the tick (no normal game
+		# step on the reset frame). Step returns a contract-valid stub step_result so the
+		# protocol path doesn't hang; the real obs builder and action wiring land in step 4.
+		if _tcp.mode() == TCP_CONTROLLER.MODE_H3 and _tcp.has_pending_h3_request():
+			var req: Dictionary = _tcp.take_pending_h3_request()
+			var rtype := str(req.get("type", ""))
+			match rtype:
+				"reset":
+					_h3_perform_soft_reset(req)
+					return
+				"step":
+					_h3_send_step_stub(req)
+					return
+				_:
+					push_warning("h3: unexpected pending request type: %s" % rtype)
+					return
 	else:
 		state = _agent.capture(_player, _hazards)
 		perceived = _agent.perceive(state)
@@ -196,3 +220,70 @@ func _on_player_died(survival_time: float, hazard_pos: Vector2, player_pos: Vect
 		_tcp.stop()
 	_survival_label.text = "DEAD  t=%.2fs" % survival_time
 	get_tree().quit()
+
+# --- H3 soft reset and step stub ----------------------------------------------
+#
+# Step 3 boundary. _h3_perform_soft_reset implements Decision 2 (in-process soft reset)
+# and returns the stub observation; step 4 will replace _h3_zero_obs with the real builder
+# defined in docs/sight-h3-plan.md section 2. _h3_send_step_stub keeps the protocol path
+# alive without applying actions or advancing physics; that wiring also lands in step 4.
+
+func _h3_zero_obs() -> Array:
+	# Step 3 stub vector. 10 floats, all 0.0. Step 4 replaces with the real builder.
+	var obs: Array = []
+	obs.resize(H3_OBS_DIM)
+	for i in range(H3_OBS_DIM):
+		obs[i] = 0.0
+	return obs
+
+func _h3_perform_soft_reset(req: Dictionary) -> void:
+	# Reset ordering follows docs/sight-h3-plan.md Decision 2 plus the GPT directive:
+	# clear hazards, reset frame/death/spawn counters, reset run timing, reposition player
+	# to the deterministic start, reseed the global RNG from the request seed, log the
+	# episode_start event, build the stub obs/info, and send reset_ok. The caller in
+	# _physics_process returns immediately after this so no normal game step runs on the
+	# reset frame. tcp_controller.gd has already validated required fields and stamped
+	# the active episode_id onto its own state; we stamp run_id/episode_id/protocol via
+	# the send helper so wire keys cannot drift here.
+	for h in _hazards:
+		if is_instance_valid(h):
+			h.queue_free()
+	_hazards.clear()
+	_frame_counter = 0
+	_alive = true
+	_hazard_id_counter = 0
+	_run_start_ms = Time.get_ticks_msec()
+	_player.position = _player_start_pos
+	var seed_value: int = int(req.get("seed", RANDOM_SEED))
+	seed(seed_value)
+	var max_steps: int = int(req.get("max_steps", 0))
+	var episode_id: String = str(req.get("episode_id", ""))
+	SightLog.log_event("episode_start", {
+		"episode_id": episode_id,
+		"seed": seed_value,
+		"max_steps": max_steps,
+		"frame": _frame_counter,
+	})
+	var info := {
+		"obs_stub": true,
+		"obs_stub_reason": H3_OBS_STUB_REASON,
+		"seed": seed_value,
+		"max_steps": max_steps,
+		"frame": _frame_counter,
+	}
+	_tcp.send_reset_ok(_frame_counter, _h3_zero_obs(), false, false, info)
+	_survival_label.text = "RESET seed=%d ep=%s" % [seed_value, episode_id]
+
+func _h3_send_step_stub(req: Dictionary) -> void:
+	# Contract-valid step_result without expanding into the step-4 observation builder or
+	# action wiring. Echoes seq, returns zeroed obs, no reward, not terminal, and the
+	# explicit obs_stub markers so harness clients can detect the stub state. The current
+	# physics tick is short-circuited (caller returns), so this does not double-step the
+	# world; the world cadence under H3 is finalized in step 4/5.
+	var seq: int = int(req.get("seq", -1))
+	var info := {
+		"obs_stub": true,
+		"obs_stub_reason": H3_OBS_STUB_REASON,
+		"frame": _frame_counter,
+	}
+	_tcp.send_step_result(seq, _frame_counter, _h3_zero_obs(), 0.0, false, false, "", info)
