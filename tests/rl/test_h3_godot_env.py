@@ -132,6 +132,15 @@ class FakeProcess:
         self.kill_calls += 1
         self._exit_code = -9
 
+    def set_exit_code(self, code: int) -> None:
+        """Test helper: simulate the process having exited with ``code``.
+
+        After this is called, ``poll()`` returns ``code`` rather than
+        ``None``, which is how the env's ``_raise_if_godot_exited`` path
+        is exercised without actually launching anything.
+        """
+        self._exit_code = code
+
     def wait(self, timeout: float | None = None) -> int:
         import subprocess as _sp
 
@@ -655,3 +664,199 @@ def test_headless_false_omits_flag(fake_proc):
 
 def test_default_max_steps_is_documented_constant():
     assert DEFAULT_MAX_STEPS == 1800
+
+
+# --- Step 6 hardening tests: Python NDJSON evidence + early-exit detection ---
+
+
+import json as _json
+
+
+def _read_ndjson_events(path) -> list[dict]:
+    """Read python.ndjson and return parsed event dicts."""
+    events: list[dict] = []
+    with open(path, "r", encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line:
+                continue
+            events.append(_json.loads(line))
+    return events
+
+
+def _make_env_with_run_dir(tmp_path, fake_proc, fake_transport, **overrides):
+    proc_factory = FakeProcessFactoryRecorder(fake_proc)
+    tx_factory = FakeTransportFactoryRecorder(fake_transport)
+    kwargs = dict(
+        godot_executable=r"C:\fake\godot.exe",
+        project_path=r"C:\fake\project",
+        tcp_host="127.0.0.1",
+        tcp_port=8765,
+        run_dir=tmp_path,
+        max_steps=100,
+        connect_timeout_s=1.0,
+        step_timeout_s=1.0,
+        seed=None,
+        headless=True,
+        transport_factory=tx_factory,
+        process_factory=proc_factory,
+    )
+    kwargs.update(overrides)
+    return GodotSignalDodgeEnv(**kwargs)
+
+
+def test_python_ndjson_written_under_run_dir(tmp_path, fake_proc, fake_transport):
+    e = _make_env_with_run_dir(tmp_path, fake_proc, fake_transport)
+    try:
+        fake_transport.queue_reset(_reset_ok_payload())
+        e.reset(seed=7)
+        fake_transport.queue_step(_step_ok_payload(seq=0, frame=1, reward=1.0))
+        e.step(1)
+    finally:
+        e.close()
+
+    ndjson_path = tmp_path / "python.ndjson"
+    assert ndjson_path.is_file(), "python.ndjson must exist under run_dir"
+    events = _read_ndjson_events(ndjson_path)
+    types = [ev["type"] for ev in events]
+    # Order: env_start (after first connect), reset, step, close.
+    assert types == ["env_start", "reset", "step", "close"], types
+    # Identity decoration is present on every line.
+    for ev in events:
+        assert ev["run_id"].startswith("sight-h3-")
+        assert ev["godot_pid"] == fake_proc.pid or ev["type"] == "close"
+        assert ev["tcp_port"] == 8765
+        assert "ts_unix" in ev
+    reset_ev = events[1]
+    assert reset_ev["episode_id"] == "ep-000001"
+    assert reset_ev["seed"] == 7
+    assert reset_ev["frame"] == 0
+    step_ev = events[2]
+    assert step_ev["frame"] == 1
+    assert step_ev["reward"] == 1.0
+    assert step_ev["terminated"] is False
+    assert step_ev["truncated"] is False
+    assert step_ev["terminal_reason"] == ""
+
+
+def test_python_ndjson_omitted_when_no_run_dir(env, fake_transport, tmp_path):
+    # The default ``env`` fixture has run_dir=None. Run a normal cycle and
+    # verify no python.ndjson appears anywhere under tmp_path or env._run_dir.
+    fake_transport.queue_reset(_reset_ok_payload())
+    env.reset(seed=0)
+    fake_transport.queue_step(_step_ok_payload(seq=0))
+    env.step(1)
+    env.close()
+    # The env never gets a run_dir, so the writer must remain None.
+    assert env._ndjson is None
+    # Defensive: confirm nothing leaked into tmp_path.
+    leftovers = list(tmp_path.glob("**/python.ndjson"))
+    assert leftovers == [], leftovers
+
+
+def test_python_ndjson_logs_error_event_on_reset_failure(
+    tmp_path, fake_proc, fake_transport
+):
+    e = _make_env_with_run_dir(tmp_path, fake_proc, fake_transport)
+    try:
+        fake_transport.queue_reset_raise(GodotProtocolError("simulated reset fail"))
+        with pytest.raises(GodotProtocolError):
+            e.reset(seed=11)
+    finally:
+        e.close()
+    events = _read_ndjson_events(tmp_path / "python.ndjson")
+    types = [ev["type"] for ev in events]
+    assert "env_start" in types
+    assert "error" in types
+    err = next(ev for ev in events if ev["type"] == "error")
+    assert err["where"] == "reset"
+    assert err["kind"] == "GodotProtocolError"
+    assert err["episode_id"] == "ep-000001"
+    assert err["seed"] == 11
+    assert "simulated reset fail" in err["message"]
+
+
+def test_python_ndjson_logs_error_event_on_step_failure(
+    tmp_path, fake_proc, fake_transport
+):
+    e = _make_env_with_run_dir(tmp_path, fake_proc, fake_transport)
+    try:
+        fake_transport.queue_reset(_reset_ok_payload())
+        e.reset(seed=0)
+        fake_transport.queue_step_raise(GodotTransportError("simulated step drop"))
+        with pytest.raises(GodotTransportError):
+            e.step(2)
+    finally:
+        e.close()
+    events = _read_ndjson_events(tmp_path / "python.ndjson")
+    err = next(ev for ev in events if ev["type"] == "error")
+    assert err["where"] == "step"
+    assert err["kind"] == "GodotTransportError"
+    assert "simulated step drop" in err["message"]
+
+
+def test_early_subprocess_exit_during_connect_raises_distinctly(fake_proc):
+    """Godot dies before TCP listener becomes reachable -> distinct error."""
+    fake_proc.set_exit_code(42)
+    tx = FakeTransport(run_id="x", host="127.0.0.1", port=0, recv_timeout_s=1.0)
+    # Make the fake transport perpetually fail to connect so the env's
+    # check happens to land on the exited process.
+    tx.connect_attempts_to_succeed = 10**9
+    proc_factory = FakeProcessFactoryRecorder(fake_proc)
+    tx_factory = FakeTransportFactoryRecorder(tx)
+    e = GodotSignalDodgeEnv(
+        godot_executable=r"C:\fake\godot.exe",
+        project_path=r"C:\fake\project",
+        tcp_port=8765,
+        connect_timeout_s=2.0,
+        step_timeout_s=1.0,
+        max_steps=10,
+        transport_factory=tx_factory,
+        process_factory=proc_factory,
+    )
+    try:
+        with pytest.raises(GodotTransportError) as exc_info:
+            e.reset(seed=0)
+        msg = str(exc_info.value)
+        # Distinguishing markers: exit code + port + cmd.
+        assert "exited" in msg.lower()
+        assert "42" in msg, msg
+        assert "8765" in msg, msg
+        assert "godot.exe" in msg.lower(), msg
+        # Must NOT be the connect-timeout message variant.
+        assert "not reachable within" not in msg
+    finally:
+        e.close()
+
+
+def test_early_exit_logs_error_event_with_run_dir(tmp_path, fake_proc):
+    fake_proc.set_exit_code(7)
+    tx = FakeTransport(run_id="x", host="127.0.0.1", port=0, recv_timeout_s=1.0)
+    tx.connect_attempts_to_succeed = 10**9
+    proc_factory = FakeProcessFactoryRecorder(fake_proc)
+    tx_factory = FakeTransportFactoryRecorder(tx)
+    e = GodotSignalDodgeEnv(
+        godot_executable=r"C:\fake\godot.exe",
+        project_path=r"C:\fake\project",
+        tcp_port=9001,
+        run_dir=tmp_path,
+        connect_timeout_s=1.0,
+        step_timeout_s=1.0,
+        max_steps=10,
+        transport_factory=tx_factory,
+        process_factory=proc_factory,
+    )
+    try:
+        with pytest.raises(GodotTransportError):
+            e.reset(seed=0)
+    finally:
+        e.close()
+    events = _read_ndjson_events(tmp_path / "python.ndjson")
+    types = [ev["type"] for ev in events]
+    # env_start should NOT have been logged because connect never succeeded.
+    assert "env_start" not in types
+    err = next(ev for ev in events if ev["type"] == "error")
+    assert err["where"] == "connect"
+    assert err["kind"] == "GodotTransportError"
+    assert "9001" in err["message"]
+    assert "exited" in err["message"].lower()

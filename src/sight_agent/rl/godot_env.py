@@ -32,12 +32,13 @@ Wire-side env vars consumed by Godot (see games/signal-dodge/scripts):
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import time
 import uuid
 from pathlib import Path
-from typing import Any, Callable
+from typing import IO, Any, Callable
 
 import gymnasium as gym
 import numpy as np
@@ -68,6 +69,52 @@ _CONNECT_PER_ATTEMPT_TIMEOUT_S: float = 0.5
 # during ``close()``. Short on purpose; Godot has nothing to flush after the
 # autoload logger's per-event flush.
 _TERMINATE_GRACE_S: float = 2.0
+
+# Filename for Python-side NDJSON evidence under ``run_dir``. Mirrors
+# ``godot.ndjson`` produced by games/signal-dodge/scripts/logger.gd via
+# the ``SIGHT_GODOT_LOG_PATH`` env var.
+_PYTHON_NDJSON_NAME: str = "python.ndjson"
+
+
+class _NdjsonWriter:
+    """Append-only NDJSON writer with per-event flush.
+
+    Minimal by design: one JSON object per line, UTF-8, newline-terminated,
+    flushed after every write so a hard kill of the Python process does not
+    truncate the latest event. ``write`` silently no-ops after ``close``.
+    """
+
+    def __init__(self, path: Path) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        self.path = path
+        self._fh: IO[str] | None = open(path, "a", encoding="utf-8", newline="")
+
+    def write(self, event_type: str, fields: dict[str, Any]) -> None:
+        if self._fh is None:
+            return
+        record: dict[str, Any] = {
+            "ts_unix": time.time(),
+            "type": event_type,
+        }
+        for k, v in fields.items():
+            if v is not None:
+                record[k] = v
+        try:
+            self._fh.write(json.dumps(record, separators=(",", ":")) + "\n")
+            self._fh.flush()
+        except (OSError, ValueError):
+            # ValueError covers writes after the underlying file was closed
+            # out from under us. Logging failures must never break the env.
+            pass
+
+    def close(self) -> None:
+        fh = self._fh
+        self._fh = None
+        if fh is not None:
+            try:
+                fh.close()
+            except OSError:
+                pass
 
 
 class GodotSignalDodgeEnv(gym.Env):
@@ -150,6 +197,15 @@ class GodotSignalDodgeEnv(gym.Env):
         self._episode_count: int = 0
         self._episode_done: bool = True
         self._closed: bool = False
+        # Diagnostic state. ``_launch_cmd`` is captured by ``_launch_godot``
+        # and surfaced in early-exit error messages so the operator can see
+        # exactly what was invoked when Godot died before listening.
+        self._launch_cmd: list[str] = []
+        # Python-side NDJSON evidence writer. Opened lazily on first
+        # ``_ensure_process_and_transport`` when ``run_dir`` is set; remains
+        # ``None`` when ``run_dir`` is None so this slice has no effect for
+        # callers that opt out of evidence capture.
+        self._ndjson: _NdjsonWriter | None = None
 
     # --- public read-only accessors --------------------------------------
 
@@ -212,15 +268,31 @@ class GodotSignalDodgeEnv(gym.Env):
                 max_steps=self._max_steps,
                 episode_id=episode_id,
             )
-        except (GodotTransportError, GodotProtocolError, GodotRemoteError):
+        except (GodotTransportError, GodotProtocolError, GodotRemoteError) as exc:
             # Transport / protocol failures must not be silently converted
             # into terminal observations. Caller decides whether to close
             # and rebuild the env.
+            self._log_event(
+                "error",
+                where="reset",
+                kind=type(exc).__name__,
+                message=str(exc),
+                episode_id=episode_id,
+                seed=episode_seed,
+            )
             raise
 
         obs = self._obs_to_np(resp["obs"])
         info = self._build_info(resp, episode_seed=episode_seed, episode_id=episode_id)
         self._episode_done = bool(resp.get("terminated") or resp.get("truncated"))
+        self._log_event(
+            "reset",
+            episode_id=episode_id,
+            seed=episode_seed,
+            frame=int(resp.get("frame", 0)),
+            terminated=bool(resp.get("terminated")),
+            truncated=bool(resp.get("truncated")),
+        )
         return obs, info
 
     def step(
@@ -243,7 +315,13 @@ class GodotSignalDodgeEnv(gym.Env):
 
         try:
             resp = self._transport.step(action)
-        except (GodotTransportError, GodotProtocolError, GodotRemoteError):
+        except (GodotTransportError, GodotProtocolError, GodotRemoteError) as exc:
+            self._log_event(
+                "error",
+                where="step",
+                kind=type(exc).__name__,
+                message=str(exc),
+            )
             raise
 
         obs = self._obs_to_np(resp["obs"])
@@ -259,6 +337,15 @@ class GodotSignalDodgeEnv(gym.Env):
         )
         if terminated or truncated:
             self._episode_done = True
+        self._log_event(
+            "step",
+            episode_id=info["episode_id"],
+            frame=info["frame"],
+            reward=reward,
+            terminated=terminated,
+            truncated=truncated,
+            terminal_reason=terminal_reason,
+        )
         return obs, reward, terminated, truncated, info
 
     def close(self) -> None:
@@ -266,6 +353,10 @@ class GodotSignalDodgeEnv(gym.Env):
         if self._closed:
             return
         self._closed = True
+
+        # Log close BEFORE tearing down the writer so the event makes it to
+        # disk. _log_event no-ops when run_dir was not supplied.
+        self._log_event("close")
 
         if self._transport is not None:
             try:
@@ -282,6 +373,10 @@ class GodotSignalDodgeEnv(gym.Env):
         if proc is not None:
             self._terminate_process(proc)
 
+        if self._ndjson is not None:
+            self._ndjson.close()
+            self._ndjson = None
+
     def __del__(self) -> None:  # pragma: no cover - finaliser best-effort
         try:
             self.close()
@@ -290,13 +385,63 @@ class GodotSignalDodgeEnv(gym.Env):
 
     # --- internals -------------------------------------------------------
 
+    def _log_event(self, event_type: str, **fields: Any) -> None:
+        """Write one Python-side NDJSON event. No-op without ``run_dir``.
+
+        Decorates every record with the durable identity fields
+        (``run_id``, ``godot_pid``, ``tcp_port``) so each line is
+        self-contained and grep-friendly. Caller-supplied ``fields``
+        override the auto-decoration only if a key collides; explicit
+        ``None`` values are dropped so a missing ``frame`` does not pollute
+        the schema.
+        """
+        if self._ndjson is None:
+            return
+        merged: dict[str, Any] = {
+            "run_id": self._run_id,
+            "godot_pid": self.godot_pid,
+            "tcp_port": self._tcp_port,
+        }
+        merged.update(fields)
+        self._ndjson.write(event_type, merged)
+
     def _ensure_process_and_transport(self) -> None:
-        """Lazy-launch Godot and connect on first reset; reuse afterwards."""
+        """Lazy-launch Godot and connect on first reset; reuse afterwards.
+
+        Opens the Python NDJSON writer first (when ``run_dir`` is set) so
+        any failure during launch / connect is recorded as an ``error``
+        event before being re-raised.
+        """
+        first_launch = self._proc is None and self._transport is None
+        if first_launch and self._ndjson is None and self._run_dir is not None:
+            self._ndjson = _NdjsonWriter(self._run_dir / _PYTHON_NDJSON_NAME)
+
         if self._proc is None:
-            self._proc = self._launch_godot()
+            try:
+                self._proc = self._launch_godot()
+            except Exception as exc:
+                self._log_event(
+                    "error",
+                    where="launch",
+                    kind=type(exc).__name__,
+                    message=str(exc),
+                )
+                raise
+
         if self._transport is None:
-            self._transport = self._connect_transport()
-            self._transport.send_hello()
+            try:
+                self._transport = self._connect_transport()
+                self._transport.send_hello()
+            except Exception as exc:
+                self._log_event(
+                    "error",
+                    where="connect",
+                    kind=type(exc).__name__,
+                    message=str(exc),
+                )
+                raise
+            if first_launch:
+                self._log_event("env_start")
 
     def _launch_godot(self) -> subprocess.Popen:
         cmd: list[str] = [str(self._godot_executable), "--path", str(self._project_path)]
@@ -311,6 +456,11 @@ class GodotSignalDodgeEnv(gym.Env):
             log_path.parent.mkdir(parents=True, exist_ok=True)
             env["SIGHT_GODOT_LOG_PATH"] = str(log_path)
 
+        # Persist the launch cmd so ``_connect_transport`` can include it in
+        # early-exit diagnostics. Captured before the factory call so a
+        # raising factory still leaves a useful breadcrumb.
+        self._launch_cmd = list(cmd)
+
         return self._process_factory(
             cmd,
             env=env,
@@ -324,6 +474,13 @@ class GodotSignalDodgeEnv(gym.Env):
         Godot needs a moment to bind the listener after ``Popen`` returns.
         Retry with a small interval; on the final attempt, surface the
         underlying ``GodotTransportError``.
+
+        Early-exit detection: between attempts, check ``self._proc.poll()``.
+        If Godot has exited before the listener became reachable, raise
+        immediately with the exit code, the launch cmd, and the port. This
+        is distinct from a connect timeout: a process that died at startup
+        will never start listening, so the operator should see the process
+        cause not the connect cause.
         """
         transport = self._transport_factory(
             run_id=self._run_id,
@@ -332,21 +489,47 @@ class GodotSignalDodgeEnv(gym.Env):
             recv_timeout_s=self._step_timeout_s,
         )
         deadline = time.monotonic() + self._connect_timeout_s
-        last_err: Exception | None = None
         attempts = 0
         while True:
             attempts += 1
+            self._raise_if_godot_exited()
             try:
                 transport.connect(connect_timeout_s=_CONNECT_PER_ATTEMPT_TIMEOUT_S)
                 return transport
             except GodotTransportError as e:
-                last_err = e
+                # Re-check after a failed attempt: Godot may have died
+                # exactly during the connect attempt rather than before it.
+                self._raise_if_godot_exited(connect_error=e)
                 if time.monotonic() >= deadline:
                     raise GodotTransportError(
                         f"Godot TCP listener not reachable within "
                         f"{self._connect_timeout_s}s after {attempts} attempts: {e}"
                     ) from e
                 time.sleep(_CONNECT_RETRY_INTERVAL_S)
+
+    def _raise_if_godot_exited(
+        self, connect_error: Exception | None = None
+    ) -> None:
+        """Raise ``GodotTransportError`` if the subprocess has exited.
+
+        Distinguishes early-exit failures from connect-timeout failures.
+        Includes exit code, launch cmd, and the port being waited on so
+        operators can diagnose without rerunning under a debugger.
+        """
+        proc = self._proc
+        if proc is None:
+            return
+        rc = proc.poll()
+        if rc is None:
+            return
+        cmd_repr = " ".join(self._launch_cmd) if self._launch_cmd else "<unknown>"
+        msg = (
+            f"Godot subprocess exited with code {rc} before TCP listener on "
+            f"port {self._tcp_port} became reachable; cmd=[{cmd_repr}]"
+        )
+        if connect_error is not None:
+            msg += f"; last connect error: {connect_error}"
+        raise GodotTransportError(msg)
 
     def _terminate_process(self, proc: subprocess.Popen) -> None:
         # Already exited?
