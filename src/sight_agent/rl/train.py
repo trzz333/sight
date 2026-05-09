@@ -44,6 +44,7 @@ from .artifacts import (
 from .callbacks import NDJSONCallback, NDJSONKVWriter, introspect_effective_hyperparams
 from .config import apply_cli_overrides, load_config
 from .factories import make_algo, make_env, smoke_check_env
+from .godot_config import is_godot_env_id, resolve_godot_kwargs
 from .ndjson_logger import NDJSONLogger, get_short_git_commit
 
 
@@ -103,6 +104,53 @@ def main(argv: list[str] | None = None) -> int:
     return run(cfg, config_path=str(args.config))
 
 
+def _build_train_env(cfg: dict[str, Any], artifacts: TrainArtifacts):
+    """Construct the train VecEnv via ``make_env``, threading Godot kwargs.
+
+    For Gymnasium env ids the call is identical to the H2-era path. For
+    ``godot:signal-dodge-v0`` the Godot-specific kwargs are resolved at the
+    plumbing layer (``godot_config.resolve_godot_kwargs``) and a distinct
+    train-side ``run_dir`` is supplied so the env's NDJSON evidence and the
+    Godot-side ``godot.ndjson`` land under ``<run_dir>/godot-train``.
+    """
+    env_id = cfg["env"]["id"]
+    n_envs = int(cfg["env"]["n_envs"])
+    seed = int(cfg["run"]["seed"])
+    extra = resolve_godot_kwargs(cfg)
+    if not extra:
+        return make_env(env_id, n_envs=n_envs, seed=seed, mode="train")
+    return make_env(
+        env_id,
+        n_envs=n_envs,
+        seed=seed,
+        mode="train",
+        run_dir=str(artifacts.run_dir / "godot-train"),
+        **extra,
+    )
+
+
+def _build_eval_env(cfg: dict[str, Any], artifacts: TrainArtifacts):
+    """Construct the in-train eval VecEnv via ``make_env`` with Godot kwargs.
+
+    Always single-env regardless of ``env.n_envs``; mirrors the H2 contract.
+    A distinct ``<run_dir>/godot-eval`` keeps eval evidence files from
+    colliding with train evidence inside the same run dir.
+    """
+    env_id = cfg["env"]["id"]
+    seed = int(cfg["run"]["seed"])
+    extra = resolve_godot_kwargs(cfg)
+    if not extra:
+        return make_env(env_id, n_envs=1, seed=seed, mode="eval")
+    return make_env(
+        env_id,
+        n_envs=1,
+        seed=seed,
+        mode="eval",
+        run_dir=str(artifacts.run_dir / "godot-eval"),
+        **extra,
+    )
+
+
 def run(cfg: dict[str, Any], config_path: str = "<inline>") -> int:
     """Execute one training run from a (validated) config dict."""
     seed = int(cfg["run"]["seed"])
@@ -142,10 +190,17 @@ def run(cfg: dict[str, Any], config_path: str = "<inline>") -> int:
     )
 
     versions = _versions()
-    obs_shape, action_n = smoke_check_env(env_id, seed)
+    # Skip the H2 smoke probe for Godot env ids: ``smoke_check_env`` calls
+    # ``gym.make(env_id)`` directly which would launch Godot. The factory
+    # path used by train/eval already covers env construction.
+    if is_godot_env_id(env_id):
+        obs_shape: tuple[int, ...] = (10,)
+        action_n = 3
+    else:
+        obs_shape, action_n = smoke_check_env(env_id, seed)
 
-    train_env = make_env(env_id, n_envs=n_envs, seed=seed, mode="train")
-    eval_env = make_env(env_id, n_envs=1, seed=seed, mode="eval")
+    train_env = _build_train_env(cfg, artifacts)
+    eval_env = _build_eval_env(cfg, artifacts)
 
     model = make_algo(
         framework=framework,

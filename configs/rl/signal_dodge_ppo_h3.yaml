@@ -1,0 +1,42 @@
+run:
+  phase: H3
+  name: signal_dodge_ppo_h3
+  seed: 0
+  out_dir: runs/rl
+
+env:
+  id: godot:signal-dodge-v0
+  n_envs: 1
+  # Local Godot binary on disk. Left null in the committed config so the
+  # repo stays portable. Resolution at run time prefers this YAML value,
+  # then falls back to the SIGHT_GODOT_EXE env var.
+  godot_executable: null
+  # Repo-root-relative project path. The H3 plumbing layer in
+  # ``sight_agent.rl.godot_config`` resolves this to an absolute path
+  # against the repo root before passing it to ``make_env``.
+  project_path: games/signal-dodge
+  # Episode budget. 30 seconds at 60 Hz, matches GodotSignalDodgeEnv default.
+  max_steps: 1800
+
+algo:
+  framework: stable-baselines3
+  name: PPO
+  policy: MlpPolicy
+  device: cpu
+  hyperparams: {}
+
+train:
+  # Smoke-oriented; H3 does not pursue training performance, only env boundary.
+  total_timesteps: 1024
+
+eval:
+  eval_freq: 512
+  n_eval_episodes: 2
+  deterministic: true
+
+logging:
+  format: ndjson
+
+checkpoint:
+  enabled: true
+  filename: model.zip

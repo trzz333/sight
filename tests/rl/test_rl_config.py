@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -13,10 +14,15 @@ from sight_agent.rl.config import (
     load_config,
     validate_config,
 )
+from sight_agent.rl.godot_config import (
+    is_godot_env_id,
+    resolve_godot_kwargs,
+)
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CFG = REPO_ROOT / "configs" / "rl" / "cartpole_ppo_h1.yaml"
+H3_GODOT_CFG = REPO_ROOT / "configs" / "rl" / "signal_dodge_ppo_h3.yaml"
 
 
 def test_default_h1_yaml_loads() -> None:
@@ -97,3 +103,81 @@ def test_apply_cli_overrides_returns_new_dict() -> None:
     out = apply_cli_overrides(cfg, {"seed": 7})
     assert cfg["run"]["seed"] == 0
     assert out["run"]["seed"] == 7
+
+
+# --- H3 Godot config and resolver ---------------------------------------
+
+
+def test_default_h3_godot_yaml_loads() -> None:
+    cfg = load_config(H3_GODOT_CFG)
+    assert cfg["run"]["phase"] == "H3"
+    assert cfg["run"]["name"] == "signal_dodge_ppo_h3"
+    assert cfg["run"]["seed"] == 0
+    assert cfg["env"]["id"] == "godot:signal-dodge-v0"
+    assert cfg["env"]["n_envs"] == 1
+    assert cfg["env"]["godot_executable"] is None
+    assert cfg["env"]["project_path"] == "games/signal-dodge"
+    assert cfg["env"]["max_steps"] == 1800
+    assert cfg["algo"]["framework"] == "stable-baselines3"
+    assert cfg["algo"]["name"] == "PPO"
+    assert cfg["algo"]["policy"] == "MlpPolicy"
+    assert cfg["algo"]["device"] == "cpu"
+    assert cfg["logging"]["format"] == "ndjson"
+    assert cfg["checkpoint"]["enabled"] is True
+    assert cfg["checkpoint"]["filename"] == "model.zip"
+
+
+def test_is_godot_env_id_only_matches_exact_id() -> None:
+    assert is_godot_env_id("godot:signal-dodge-v0") is True
+    assert is_godot_env_id("CartPole-v1") is False
+    assert is_godot_env_id("godot:other-v0") is False
+    assert is_godot_env_id(None) is False
+
+
+def test_resolve_godot_kwargs_returns_empty_for_non_godot(monkeypatch) -> None:
+    monkeypatch.setenv("SIGHT_GODOT_EXE", "/should/be/ignored")
+    monkeypatch.setenv("SIGHT_GODOT_PROJECT", "/should/be/ignored")
+    cfg = yaml.safe_load(DEFAULT_CFG.read_text(encoding="utf-8"))
+    assert resolve_godot_kwargs(cfg) == {}
+
+
+def test_resolve_godot_kwargs_resolves_relative_project_path(monkeypatch) -> None:
+    """Relative ``env.project_path`` resolves to the repo-root-relative path."""
+    monkeypatch.delenv("SIGHT_GODOT_EXE", raising=False)
+    monkeypatch.delenv("SIGHT_GODOT_PROJECT", raising=False)
+    cfg = yaml.safe_load(H3_GODOT_CFG.read_text(encoding="utf-8"))
+    extra = resolve_godot_kwargs(cfg)
+    assert set(extra.keys()) == {"godot_executable", "project_path"}
+    # godot_executable null in YAML and env var unset -> None passed through.
+    assert extra["godot_executable"] is None
+    expected = (REPO_ROOT / "games" / "signal-dodge").resolve()
+    assert Path(extra["project_path"]).resolve() == expected
+    assert Path(extra["project_path"]).is_absolute()
+
+
+def test_resolve_godot_kwargs_uses_env_var_when_yaml_null(
+    monkeypatch, tmp_path: Path
+) -> None:
+    cfg = yaml.safe_load(H3_GODOT_CFG.read_text(encoding="utf-8"))
+    cfg["env"]["godot_executable"] = None
+    cfg["env"]["project_path"] = None
+    fake_exe = tmp_path / "godot.exe"
+    fake_proj = tmp_path / "fake-project"
+    fake_proj.mkdir()
+    monkeypatch.setenv("SIGHT_GODOT_EXE", str(fake_exe))
+    monkeypatch.setenv("SIGHT_GODOT_PROJECT", str(fake_proj))
+    extra = resolve_godot_kwargs(cfg)
+    assert extra["godot_executable"] == str(fake_exe)
+    assert Path(extra["project_path"]) == fake_proj
+
+
+def test_resolve_godot_kwargs_yaml_overrides_env_var(monkeypatch, tmp_path: Path) -> None:
+    """Explicit YAML values must NOT be overridden by env vars."""
+    cfg = yaml.safe_load(H3_GODOT_CFG.read_text(encoding="utf-8"))
+    cfg["env"]["godot_executable"] = str(tmp_path / "yaml-godot.exe")
+    cfg["env"]["project_path"] = str(tmp_path / "yaml-project")
+    monkeypatch.setenv("SIGHT_GODOT_EXE", str(tmp_path / "envvar-godot.exe"))
+    monkeypatch.setenv("SIGHT_GODOT_PROJECT", str(tmp_path / "envvar-project"))
+    extra = resolve_godot_kwargs(cfg)
+    assert extra["godot_executable"] == str(tmp_path / "yaml-godot.exe")
+    assert extra["project_path"] == str(tmp_path / "yaml-project")

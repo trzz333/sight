@@ -38,6 +38,7 @@ from .artifacts import (
     prepare_eval_artifacts,
 )
 from .factories import make_env
+from .godot_config import is_godot_env_id, resolve_godot_kwargs
 from .ndjson_logger import NDJSONLogger, get_short_git_commit
 
 
@@ -58,6 +59,66 @@ def _load_train_summary(train_run_dir: Path) -> dict[str, Any]:
     if not summary_path.exists():
         raise FileNotFoundError(f"summary.json not found at {summary_path}")
     return json.loads(summary_path.read_text(encoding="utf-8"))
+
+
+def _load_train_effective_config(train_run_dir: Path) -> dict[str, Any]:
+    """Reload the effective YAML from a completed train run dir.
+
+    Required when the train run was a Godot run, so eval can recover the
+    ``godot_executable`` / ``project_path`` plumbing from the YAML rather
+    than re-deriving them. Out-of-band evals that target Gymnasium env ids
+    do not call this; the env id alone is enough for them.
+    """
+    import yaml  # local import: keep eval CLI free of yaml when not needed
+
+    cfg_path = train_run_dir / "config_effective.yaml"
+    if not cfg_path.exists():
+        raise FileNotFoundError(
+            f"config_effective.yaml not found at {cfg_path}; H3 godot eval "
+            f"requires it to recover godot_executable / project_path."
+        )
+    cfg = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
+    if not isinstance(cfg, dict):
+        raise ValueError(
+            f"config_effective.yaml at {cfg_path} did not load as a mapping"
+        )
+    return cfg
+
+
+def _build_eval_env_for_train_run(
+    env_id: str,
+    seed: int,
+    artifacts: EvalArtifacts,
+    train_run_dir: Path,
+):
+    """Construct the eval VecEnv for a completed train run.
+
+    Routes Godot ids through the factory's Godot branch with kwargs recovered
+    from the train run's ``config_effective.yaml``. The eval ``run_dir`` lives
+    under the eval artifacts dir so eval-side NDJSON evidence is namespaced
+    away from train-side evidence; train-run dirs already carry their own
+    ``godot-train`` / ``godot-eval`` subdirs from ``train.py``.
+    """
+    if not is_godot_env_id(env_id):
+        return make_env(env_id, n_envs=1, seed=seed, mode="eval")
+    train_cfg = _load_train_effective_config(train_run_dir)
+    extra = resolve_godot_kwargs(train_cfg)
+    if not extra:
+        # Defensive: env id said Godot but the recovered config did not.
+        # Fail clearly rather than guessing kwargs.
+        raise ValueError(
+            f"Train run {train_run_dir} reports env_id={env_id!r} but its "
+            f"config_effective.yaml did not yield Godot env kwargs; cannot "
+            f"build eval env without godot_executable / project_path."
+        )
+    return make_env(
+        env_id,
+        n_envs=1,
+        seed=seed,
+        mode="eval",
+        run_dir=str(artifacts.eval_dir / "godot-eval"),
+        **extra,
+    )
 
 
 def _resolve_model_path(train_run_dir: Path, train_summary: dict[str, Any]) -> Path:
@@ -156,7 +217,12 @@ def run_eval(
         git_commit=git_commit,
     )
 
-    eval_env = make_env(env_id, n_envs=1, seed=seed, mode="eval")
+    eval_env = _build_eval_env_for_train_run(
+        env_id=env_id,
+        seed=seed,
+        artifacts=artifacts,
+        train_run_dir=train_run_dir,
+    )
     model = PPO.load(str(model_path), device="cpu")
 
     t0 = time.time()
