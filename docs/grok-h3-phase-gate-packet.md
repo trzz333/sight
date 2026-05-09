@@ -108,7 +108,7 @@ commits applied after capture do not change source, config, test, or
 GDScript content.
 
 (Substantive HEAD hash for this round will be patched into this section
-when the commit lands. The hash placeholder is `<h3-step10-final>`.)
+when the commit lands. The hash placeholder is `7e4f23f`.)
 
 
 ## 4. Test gate
