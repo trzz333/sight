@@ -30,8 +30,11 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-# Default run excludes live_mss. Invoke the live smoke with: pytest -m live_mss
-addopts = "-ra -m 'not live_mss'"
+# Default run excludes live_mss and live_godot. Opt-in commands:
+#   pytest -m live_mss
+#   pytest tests/rl/test_h3_godot_smoke.py -m live_godot -v --tb=short
+addopts = "-ra -m 'not live_mss and not live_godot'"
 markers = [
     "live_mss: live MSS capture smoke test (requires display, optional)",
+    "live_godot: live Godot Signal Dodge H3 smoke test (requires SIGHT_GODOT_EXE)",
 ]
