@@ -201,6 +201,12 @@ class GodotSignalDodgeEnv(gym.Env):
         # and surfaced in early-exit error messages so the operator can see
         # exactly what was invoked when Godot died before listening.
         self._launch_cmd: list[str] = []
+        # Godot stdout/stderr file handles. Opened by ``_launch_godot`` when
+        # ``run_dir`` is set so post-mortem inspection can recover the
+        # engine's stdio after a hang or crash. ``None`` when ``run_dir`` is
+        # not supplied (DEVNULL is used instead). Closed by ``close()``.
+        self._godot_stdout_file: IO[bytes] | None = None
+        self._godot_stderr_file: IO[bytes] | None = None
         # Python-side NDJSON evidence writer. Opened lazily on first
         # ``_ensure_process_and_transport`` when ``run_dir`` is set; remains
         # ``None`` when ``run_dir`` is None so this slice has no effect for
@@ -373,6 +379,24 @@ class GodotSignalDodgeEnv(gym.Env):
         if proc is not None:
             self._terminate_process(proc)
 
+        # Release stdout/stderr file handles after the child has been
+        # terminated so any final flush/close from Godot has landed before
+        # we drop the parent's view. ``close()`` is idempotent; both fields
+        # may already be ``None`` if ``run_dir`` was not supplied or if a
+        # prior ``close()`` cleared them.
+        if self._godot_stdout_file is not None:
+            try:
+                self._godot_stdout_file.close()
+            except OSError:
+                pass
+            self._godot_stdout_file = None
+        if self._godot_stderr_file is not None:
+            try:
+                self._godot_stderr_file.close()
+            except OSError:
+                pass
+            self._godot_stderr_file = None
+
         if self._ndjson is not None:
             self._ndjson.close()
             self._ndjson = None
@@ -461,11 +485,40 @@ class GodotSignalDodgeEnv(gym.Env):
         # raising factory still leaves a useful breadcrumb.
         self._launch_cmd = list(cmd)
 
+        # Stdout/stderr redirection. CRITICAL: ``subprocess.PIPE`` deadlocks
+        # Godot 4.6.2 on Windows at startup before ``_ready()`` runs, with
+        # no data ever written to the pipe. Verified via matrix test on
+        # 2026-05-09 against both the windowed and console builds: PIPE
+        # hangs the engine at the version banner; ``CREATE_NO_WINDOW``
+        # does not help; ``DEVNULL`` and file redirection both work in
+        # under one second. Root cause is Godot's Windows stdio handle
+        # path interacting badly with anonymous pipes from a non-console
+        # parent. File-based capture preserves stdout/stderr evidence on
+        # crashes when ``run_dir`` is set so the operator can post-mortem
+        # without reproducing the crash; ``DEVNULL`` is the fallback when
+        # no ``run_dir`` is supplied.
+        stdout_target: Any
+        stderr_target: Any
+        if self._run_dir is not None:
+            run_dir_path = Path(self._run_dir)
+            run_dir_path.mkdir(parents=True, exist_ok=True)
+            self._godot_stdout_file = open(
+                run_dir_path / "godot-stdout.log", "wb"
+            )
+            self._godot_stderr_file = open(
+                run_dir_path / "godot-stderr.log", "wb"
+            )
+            stdout_target = self._godot_stdout_file
+            stderr_target = self._godot_stderr_file
+        else:
+            stdout_target = subprocess.DEVNULL
+            stderr_target = subprocess.DEVNULL
+
         return self._process_factory(
             cmd,
             env=env,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            stdout=stdout_target,
+            stderr=stderr_target,
         )
 
     def _connect_transport(self) -> GodotH3Transport:

@@ -9,6 +9,7 @@ Run:
 
 from __future__ import annotations
 
+import subprocess
 from typing import Any
 
 import numpy as np
@@ -672,3 +673,95 @@ def test_early_exit_logs_error_event_with_run_dir(tmp_path, fake_proc):
     assert err["kind"] == "GodotTransportError"
     assert "9001" in err["message"]
     assert "exited" in err["message"].lower()
+
+
+
+# Test: Godot 4.6.2 hangs at startup if stdout/stderr are subprocess.PIPE
+# under Popen on Windows (verified by matrix test 2026-05-09 against both
+# windowed and console builds). The env's process factory must be invoked
+# with file-like objects (when run_dir is set) or subprocess.DEVNULL (when
+# not), never subprocess.PIPE. This is a regression guard, not a Gym
+# semantics test.
+
+
+def test_launch_passes_devnull_for_stdio_when_no_run_dir(env, fake_transport):
+    """No run_dir -> Popen called with DEVNULL for both stdout and stderr."""
+    fake_transport.queue_reset(_reset_ok_payload())
+    env.reset(seed=0)
+    call = env._test_proc_factory.calls[0]  # type: ignore[attr-defined]
+    assert call["stdout"] is subprocess.DEVNULL
+    assert call["stderr"] is subprocess.DEVNULL
+
+
+def test_launch_passes_file_handles_for_stdio_when_run_dir_set(
+    tmp_path, fake_proc
+) -> None:
+    """run_dir set -> Popen called with binary-write file objects under run_dir.
+
+    Files land at ``godot-stdout.log`` / ``godot-stderr.log`` next to
+    ``godot.ndjson`` so a hang or crash leaves recoverable stdio evidence.
+    """
+    tx = FakeTransport(run_id="x", host="127.0.0.1", port=0, recv_timeout_s=1.0)
+    tx.queue_reset(_reset_ok_payload())
+    proc_factory = FakeProcessFactoryRecorder(fake_proc)
+    tx_factory = FakeTransportFactoryRecorder(tx)
+    e = GodotSignalDodgeEnv(
+        godot_executable="x",
+        project_path="y",
+        run_dir=tmp_path,
+        connect_timeout_s=1.0,
+        step_timeout_s=1.0,
+        max_steps=10,
+        transport_factory=tx_factory,
+        process_factory=proc_factory,
+    )
+    try:
+        e.reset(seed=0)
+        call = proc_factory.calls[0]
+        # Neither value may be subprocess.PIPE (the deadlock trigger) and
+        # neither may be DEVNULL (we have a run_dir; capture is required).
+        assert call["stdout"] is not subprocess.PIPE
+        assert call["stderr"] is not subprocess.PIPE
+        assert call["stdout"] is not subprocess.DEVNULL
+        assert call["stderr"] is not subprocess.DEVNULL
+        # The captured handles must be writable file objects pointed at
+        # the documented filenames under run_dir.
+        out_h = call["stdout"]
+        err_h = call["stderr"]
+        assert hasattr(out_h, "write")
+        assert hasattr(err_h, "write")
+        assert (tmp_path / "godot-stdout.log").is_file()
+        assert (tmp_path / "godot-stderr.log").is_file()
+    finally:
+        e.close()
+
+
+def test_close_releases_godot_stdio_files(tmp_path, fake_proc) -> None:
+    """``close()`` must close the stdout/stderr file handles it opened."""
+    tx = FakeTransport(run_id="x", host="127.0.0.1", port=0, recv_timeout_s=1.0)
+    tx.queue_reset(_reset_ok_payload())
+    proc_factory = FakeProcessFactoryRecorder(fake_proc)
+    tx_factory = FakeTransportFactoryRecorder(tx)
+    e = GodotSignalDodgeEnv(
+        godot_executable="x",
+        project_path="y",
+        run_dir=tmp_path,
+        connect_timeout_s=1.0,
+        step_timeout_s=1.0,
+        max_steps=10,
+        transport_factory=tx_factory,
+        process_factory=proc_factory,
+    )
+    e.reset(seed=0)
+    call = proc_factory.calls[0]
+    out_h = call["stdout"]
+    err_h = call["stderr"]
+    # Both handles are open before close.
+    assert not out_h.closed
+    assert not err_h.closed
+    e.close()
+    # Both handles must be closed after close().
+    assert out_h.closed
+    assert err_h.closed
+    # close() is idempotent.
+    e.close()

@@ -296,8 +296,15 @@ func _legacy_dispatch(msg: Dictionary) -> void:
 
 func _h3_dispatch(msg: Dictionary) -> void:
 	# Protocol-version check applies to every H3-class message.
+	# JSON has no int/float distinction at the wire level. Godot 4.6.2's
+	# JSON.parse_string widens integer numbers to TYPE_FLOAT, so a Python
+	# json.dumps({"protocol_version": 2}) arrives here as a float. Accept
+	# both TYPE_INT and TYPE_FLOAT and compare via int() coercion; the
+	# values we exchange are always small whole numbers so int() round-trip
+	# is exact.
 	var pv = msg.get(FIELD_PROTOCOL_VERSION)
-	if typeof(pv) != TYPE_INT or int(pv) != H3_PROTOCOL_VERSION:
+	var pv_type := typeof(pv)
+	if (pv_type != TYPE_INT and pv_type != TYPE_FLOAT) or int(pv) != H3_PROTOCOL_VERSION:
 		send_error(ERROR_PROTOCOL_VERSION_MISMATCH,
 			"expected protocol_version=%d, got %s" % [H3_PROTOCOL_VERSION, str(pv)])
 		return
