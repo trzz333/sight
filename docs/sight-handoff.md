@@ -6,7 +6,7 @@ Canonical handoff document. Updated at the end of every session by whoever execu
 
 **Phase:** H3 closure pending Grok GREEN verdict on `docs/grok-h3-phase-gate-packet.md`. H3 implementation complete at the technical-acceptance tier. H4 plan drafted at `docs/sight-h4-plan.md`. H4 pre-implementation viewport spike complete; verdict and durable record at `docs/sight-h4-spike.md`. H4 implementation remains gated on H3 closure GREEN.
 
-**Last commit:** `926429b` chore: refresh handoff for h4 plan landing
+**Last commit:** `11398ab` docs: record h4 viewport spike verdict (option 2, windowed)
 
 **Current task:** Awaiting Grok verdict on the H3 phase-gate packet. The self-contained review bundle is at `runs/handoff/sight-h3-grok-review-bundle.md` (46098 bytes, gitignored). H4 spike resolved Decision 2: option 2 (windowed Godot viewport API) is the default pixel source. Option 1 (headless) blocked because Godot 4.6.2's `--headless` dummy display server does not emit `RenderingServer.frame_post_draw`. Option 3 (synthetic raster) remains a last-resort fallback, not invoked. Option 4 (MSS) remains rejected.
 
