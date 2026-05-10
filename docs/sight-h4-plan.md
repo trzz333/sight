@@ -59,6 +59,13 @@ The wire payload schema for pixel observations:
 - `obs.encoding` is `"flat_uint8"` initially, with room to grow to `"base64"` later.
 - `obs.data` is an array of integers in `[0, 255]` of length 7056 for `flat_uint8`.
 
+Pixel-mode reset and step responses MUST also carry source metadata so reviewers can audit the capture path:
+
+- `obs.pixel_source` is `"godot_windowed_viewport"` for the H4 default. Any other value indicates a fallback (option 3 synthetic raster or a future SubViewport path) and requires explicit Jeff approval before landing.
+- `obs.capture_point` is `"RenderingServer.frame_post_draw"` for the H4 default, matching the spike-resolved synchronization barrier.
+- `obs.headless_allowed` is `false` for pixel and both modes. Set explicitly so artifact consumers do not need to infer the windowed requirement.
+- `obs.viewport_width` and `obs.viewport_height` are integers recording the viewport size set at env construction (separate from the resized 84x84 observation; the spike caveat about default 64x64 viewport is closed by setting this deliberately).
+
 ### Decision 5: policy
 
 PPO + `CnnPolicy` from SB3. CPU-first. RTX 2060 may be tried after H4 closes, but H4 acceptance does not depend on CUDA.
@@ -104,6 +111,7 @@ The existing `GodotSignalDodgeEnv` gains:
 - Constructor parameter `observation_mode: Literal["state", "pixel", "both"] = "state"`.
 - Constructor parameters `pixel_width: int = 84`, `pixel_height: int = 84`, `pixel_channels: int = 1`.
 - Validation. Any other value for `observation_mode` raises `ValueError` at construction.
+- Headless rejection. `observation_mode` in `{"pixel", "both"}` MUST reject a resolved `headless=True` configuration at construction time by raising `ValueError`. Per the H3-to-H4 closure caveats, caller intent must be honored or rejected, not silently transformed. The env does not auto-flip `headless` to `False` for pixel modes.
 - `observation_space` selection.
   - `state` is unchanged from H3.
   - `pixel` is `Box(0, 255, (pixel_channels, pixel_height, pixel_width), uint8)`.
@@ -178,7 +186,9 @@ Optional live training smoke:
 
 ## 9. Determinism posture
 
-Same-seed first-pixel reproducibility is the binding determinism criterion for H4.
+Same-seed step-by-step scripted trajectory equality is the binding determinism criterion for H4. Per the H3-to-H4 closure caveats, first-pixel equality is necessary but not sufficient: H4 must verify that two runs at the same seed under the same scripted action sequence produce matching pixel observations at every step, not merely on the first observation.
+
+H3-style pre-mode-lock physics-tick variance is permitted in the pre-handshake window only; trajectory comparison applies to post-mode-lock observations exclusively, consistent with the H3 closure caveat carried forward by the Grok GREEN verdict.
 
 The viewport-readback path can introduce nondeterminism through render-thread ordering, frame-queue depth, and compositor timing. The spike characterizes this. If frame-queue-sensitive timing is observed, H4 must specify the capture point, for example immediately after physics tick with a forced render flush, and verify reproducibility under that capture point before declaring closure.
 
@@ -193,7 +203,7 @@ H4 technical acceptance is GREEN only if all of the following are true:
 3. The pixel observation space is `Box(0, 255, (1, 84, 84), uint8)`, or a documented alternative that passes installed-SB3 evidence.
 4. `reset(seed=0)` returns valid pixel obs.
 5. `step(action)` returns valid pixel obs in the Gymnasium 5-tuple.
-6. Same seed plus same scripted action sequence produces a matching first pixel observation across two runs.
+6. Same seed plus same scripted action sequence produces matching pixel observations at every post-mode-lock step across two runs (step-by-step trajectory equality, not merely first-pixel equality). Pre-mode-lock physics-tick variance is permitted per the H3 closure caveat.
 7. Pixel source matches one of options 1, 2, or 3 from Decision 2, documented with spike evidence and acceptance-run evidence.
 8. SB3 PPO `CnnPolicy` constructs successfully from `configs/rl/signal_dodge_ppo_h4_pixel.yaml`.
 9. A short CNN smoke run completes without crash and writes local artifacts.
