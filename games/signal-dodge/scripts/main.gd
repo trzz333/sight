@@ -353,7 +353,24 @@ func _h3_perform_soft_reset(req: Dictionary) -> void:
 		"max_steps": _h3_max_steps,
 		"frame": _frame_counter,
 	}
-	_tcp.send_reset_ok(_frame_counter, _h3_build_observation(), false, false, info)
+	# H4 step 3 obs branch. State mode preserves H3 byte-compat
+	# (length-10 numeric Array via send_reset_ok). Pixel mode awaits
+	# the next RenderingServer.frame_post_draw, captures the windowed
+	# Godot viewport, downsamples to the locked controller dims as
+	# grayscale L8, and emits the H4 structured payload via the new
+	# send_reset_ok_pixel helper. Capture failure is reported as an
+	# internal error rather than a synthetic raster; the env layer
+	# treats remote errors as fatal and does not fall back.
+	var obs_mode: String = _tcp.h3_observation_mode()
+	if obs_mode == TCP_CONTROLLER.OBS_MODE_PIXEL:
+		var pix_obs: Dictionary = await _h4_capture_pixel_obs()
+		if pix_obs.is_empty():
+			_tcp.send_error(TCP_CONTROLLER.ERROR_INTERNAL,
+				"pixel viewport capture failed on reset")
+			return
+		_tcp.send_reset_ok_pixel(_frame_counter, pix_obs, false, false, info)
+	else:
+		_tcp.send_reset_ok(_frame_counter, _h3_build_observation(), false, false, info)
 	_survival_label.text = "RESET seed=%d ep=%s" % [seed_value, episode_id]
 
 func _h3_perform_step(req: Dictionary, delta: float) -> void:
@@ -432,15 +449,36 @@ func _h3_perform_step(req: Dictionary, delta: float) -> void:
 	_survival_label.text = "H3 step %d  action=%d  r=%.0f%s" % [
 		_frame_counter, mapped, reward, status_suffix,
 	]
-	# 11. Send step_result. tcp_controller stamps run_id/episode_id/protocol_version.
+	# 11. Build the step_result info dict (state and pixel paths share
+	# this structure). tcp_controller stamps run_id/episode_id/protocol
+	# in the helpers; this dict carries the per-step Godot-side data.
 	var info := {
 		"frame": _frame_counter,
 		"action": mapped,
 	}
 	if terminated and not _h3_collision_info.is_empty():
 		info["collision"] = _h3_collision_info.duplicate()
-	_tcp.send_step_result(seq, _frame_counter, obs, reward, terminated, truncated,
-		terminal_reason, info)
+	# 12. Send step_result. H4 step 3 obs branch. State mode preserves
+	# H3 byte-compat (length-10 numeric Array via send_step_result).
+	# Pixel mode awaits the next RenderingServer.frame_post_draw,
+	# captures the windowed Godot viewport (post-physics, post-render),
+	# downsamples to the locked controller dims as grayscale L8, and
+	# emits the H4 structured payload via send_step_result_pixel. The
+	# state obs is still built above so the local h3_step NDJSON event
+	# carries cross-mode evidence parity. Capture failure is reported
+	# as an internal error rather than a synthetic raster.
+	var obs_mode: String = _tcp.h3_observation_mode()
+	if obs_mode == TCP_CONTROLLER.OBS_MODE_PIXEL:
+		var pix_obs: Dictionary = await _h4_capture_pixel_obs()
+		if pix_obs.is_empty():
+			_tcp.send_error(TCP_CONTROLLER.ERROR_INTERNAL,
+				"pixel viewport capture failed on step seq=%d" % seq)
+			return
+		_tcp.send_step_result_pixel(seq, _frame_counter, pix_obs, reward,
+			terminated, truncated, terminal_reason, info)
+	else:
+		_tcp.send_step_result(seq, _frame_counter, obs, reward, terminated, truncated,
+			terminal_reason, info)
 
 # --- H3 observation builder --------------------------------------------------
 #
@@ -515,3 +553,101 @@ func _h3_sort_hazards_by_threat() -> Array:
 		return sid_a < sid_b
 	)
 	return candidates
+
+
+# --- H4 step 3 windowed Godot viewport pixel source --------------------------
+#
+# docs/sight-h4-spike.md option 2 (windowed Godot viewport API). The spike
+# proved Godot 4.6.2 --headless does not emit RenderingServer.frame_post_draw,
+# so this build refuses pixel mode under headless launch (env-side
+# construction guard) and the wire payload sets headless_allowed=false.
+#
+# Capture point: RenderingServer.frame_post_draw, awaited inside the
+# consumed reset/step path. The await suspends _h3_perform_soft_reset /
+# _h3_perform_step until after the next render, so the captured frame
+# reflects the post-physics scene state (player position, hazards). H3
+# pause-world cadence is preserved: while suspended, idle physics ticks
+# fall through `if not _tcp.has_pending_h3_request(): return` and do
+# nothing.
+#
+# Pipeline: get_viewport().get_texture().get_image() ->
+# Image.convert(FORMAT_L8) -> Image.resize(w, h, INTERPOLATE_NEAREST) ->
+# get_data() -> per-byte int Array of length C*H*W.
+#
+# Returned Dictionary mirrors src/sight_agent/protocol.py
+# REQUIRED_FIELDS_PIXEL_OBS exactly. Empty Dictionary signals capture
+# failure; callers send ERROR_INTERNAL rather than fabricate bytes.
+#
+# Channels: only c=1 (grayscale L8) is implemented. tcp_controller
+# rejects c!=1 at reset, so this is defensive belt-and-suspenders.
+
+const H4_PIXEL_SOURCE_WINDOWED_VIEWPORT := "godot_windowed_viewport"
+const H4_CAPTURE_POINT_FRAME_POST_DRAW := "RenderingServer.frame_post_draw"
+const H4_HEADLESS_ALLOWED := false
+
+func _h4_capture_pixel_obs() -> Dictionary:
+	# Synchronization barrier: wait for the current frame's render to
+	# complete so get_image() reflects the post-physics scene state.
+	# Without this await, get_texture() can return stale pixels from a
+	# prior frame, breaking same-seed step-by-step trajectory equality.
+	await RenderingServer.frame_post_draw
+	var w: int = _tcp.h3_pixel_width()
+	var h: int = _tcp.h3_pixel_height()
+	var c: int = _tcp.h3_pixel_channels()
+	if c != 1:
+		# tcp_controller should have rejected this at reset. Defensive
+		# guard so a future regression cannot silently emit a corrupt
+		# payload from main.gd.
+		push_error("h4: unexpected channels=%d in capture; tcp_controller should have rejected" % c)
+		return {}
+	var vp: Viewport = get_viewport()
+	if vp == null:
+		push_error("h4: get_viewport() returned null; pixel capture aborted")
+		return {}
+	var vp_size: Vector2 = vp.get_visible_rect().size
+	var tex: ViewportTexture = vp.get_texture()
+	if tex == null:
+		push_error("h4: viewport texture null; pixel capture aborted")
+		return {}
+	var img: Image = tex.get_image()
+	if img == null:
+		push_error("h4: viewport image null; pixel capture aborted")
+		return {}
+	# Convert to grayscale L8 first so resize operates on one byte per
+	# pixel (faster than RGBA8 and matches the spike-resolved format).
+	img.convert(Image.FORMAT_L8)
+	# INTERPOLATE_NEAREST keeps capture deterministic across same-seed
+	# runs; bilinear/cubic depend on subpixel float math that the
+	# H4-plan section 9 same-seed step-by-step equality criterion
+	# treats as a regression risk.
+	img.resize(w, h, Image.INTERPOLATE_NEAREST)
+	var raw: PackedByteArray = img.get_data()
+	var expected_len: int = c * h * w
+	if raw.size() != expected_len:
+		# Image.get_data() should return exactly C*H*W bytes for L8 at
+		# the requested size. A length mismatch indicates a Godot bug
+		# or an unexpected format conversion; treat as fatal.
+		push_error("h4: pixel data length %d != expected %d" % [raw.size(), expected_len])
+		return {}
+	# Convert PackedByteArray to a typed int Array so JSON.stringify
+	# emits a numeric JSON array (the Python transport's flat_uint8
+	# encoding contract). Per-element int conversion is acceptable for
+	# default 84*84*1 = 7056 elements; if H4 default ever grows, switch
+	# to base64 (already a documented post-acceptance optimization slot
+	# in docs/sight-h4-plan.md Decision 4).
+	var flat: Array = []
+	flat.resize(expected_len)
+	for i in range(expected_len):
+		flat[i] = int(raw[i])
+	return {
+		"mode": TCP_CONTROLLER.OBS_MODE_PIXEL,
+		"shape": [c, h, w],
+		"dtype": "uint8",
+		"encoding": "flat_uint8",
+		"data": flat,
+		"pixel_source": H4_PIXEL_SOURCE_WINDOWED_VIEWPORT,
+		"capture_point": H4_CAPTURE_POINT_FRAME_POST_DRAW,
+		"headless_allowed": H4_HEADLESS_ALLOWED,
+		"viewport_width": int(vp_size.x),
+		"viewport_height": int(vp_size.y),
+	}

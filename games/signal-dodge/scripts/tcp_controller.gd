@@ -459,12 +459,22 @@ func _h3_handle_reset(msg: Dictionary) -> void:
 		requested_h = h_ok
 		requested_c = c_ok
 
-	# Pixel source not yet implemented. Refuse pixel/both at reset so
-	# main.gd is never asked to emit pixel obs from a half-built path.
-	# State mode falls through to the H3 happy path unchanged.
-	if requested_mode != OBS_MODE_STATE:
+	# H4 step 3 unblocks pixel mode via the windowed Godot viewport
+	# capture path (docs/sight-h4-spike.md option 2). main.gd performs
+	# the actual viewport capture inside the consumed reset/step; this
+	# controller's responsibility is to lock the active mode and dims
+	# so the dispatcher can branch deterministically. Both mode remains
+	# deferred per docs/sight-h4-plan.md section 1; channels != 1 is
+	# also deferred for this slice (only L8 grayscale is implemented).
+	# Loud rejection here prevents main.gd from being asked to emit a
+	# half-built payload.
+	if requested_mode == OBS_MODE_BOTH:
 		send_error(ERROR_BAD_REQUEST,
-			"observation_mode=%s not yet implemented in this build; pixel source lands in H4 step 4" % requested_mode)
+			"observation_mode=both not yet implemented in this build; use state or pixel")
+		return
+	if requested_mode == OBS_MODE_PIXEL and requested_c != 1:
+		send_error(ERROR_BAD_REQUEST,
+			"pixel_channels=%d not supported in this build; only channels=1 (grayscale L8) is implemented" % requested_c)
 		return
 
 	# Lock active mode and dims for this episode. Mid-episode mode change
@@ -551,6 +561,50 @@ func send_reset_ok(frame: int, obs: Array, terminated: bool, truncated: bool,
 	_send_json_line(payload)
 
 func send_step_result(seq: int, frame: int, obs: Array, reward: float,
+		terminated: bool, truncated: bool, terminal_reason: String,
+		info: Dictionary) -> void:
+	var payload := {
+		"type": MSG_STEP_RESULT,
+		FIELD_PROTOCOL_VERSION: H3_PROTOCOL_VERSION,
+		"run_id": _run_id,
+		"episode_id": _h3_episode_id,
+		"seq": seq,
+		"frame": frame,
+		"obs": obs,
+		"reward": reward,
+		"terminated": terminated,
+		"truncated": truncated,
+		"terminal_reason": terminal_reason,
+		"info": info,
+	}
+	_send_json_line(payload)
+
+# H4 step 3 send helpers. Identical envelope to the state-mode helpers
+# above except the obs field carries the H4 structured pixel-obs
+# Dictionary (mode/shape/dtype/encoding/data/pixel_source/capture_point/
+# headless_allowed/viewport_width/viewport_height) instead of the
+# length-10 numeric Array. Kept distinct so the GDScript type signatures
+# stay tight and so a future regression cannot silently emit an Array
+# where a Dict is required (or vice versa). Caller (main.gd) is
+# responsible for awaiting RenderingServer.frame_post_draw and building
+# the dict; the controller only stamps run_id / episode_id / protocol.
+
+func send_reset_ok_pixel(frame: int, obs: Dictionary, terminated: bool,
+		truncated: bool, info: Dictionary) -> void:
+	var payload := {
+		"type": MSG_RESET_OK,
+		FIELD_PROTOCOL_VERSION: H3_PROTOCOL_VERSION,
+		"run_id": _run_id,
+		"episode_id": _h3_episode_id,
+		"frame": frame,
+		"obs": obs,
+		"terminated": terminated,
+		"truncated": truncated,
+		"info": info,
+	}
+	_send_json_line(payload)
+
+func send_step_result_pixel(seq: int, frame: int, obs: Dictionary, reward: float,
 		terminated: bool, truncated: bool, terminal_reason: String,
 		info: Dictionary) -> void:
 	var payload := {
