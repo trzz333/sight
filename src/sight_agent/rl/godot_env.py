@@ -38,7 +38,7 @@ import subprocess
 import time
 import uuid
 from pathlib import Path
-from typing import IO, Any, Callable
+from typing import IO, Any, Callable, Literal
 
 import gymnasium as gym
 import numpy as np
@@ -160,6 +160,10 @@ class GodotSignalDodgeEnv(gym.Env):
         step_timeout_s: float = 5.0,
         seed: int | None = None,
         headless: bool = True,
+        observation_mode: Literal["state", "pixel", "both"] = "state",
+        pixel_width: int = 84,
+        pixel_height: int = 84,
+        pixel_channels: int = 1,
         transport_factory: Callable[..., GodotH3Transport] | None = None,
         process_factory: Callable[..., subprocess.Popen] | None = None,
     ) -> None:
@@ -171,6 +175,31 @@ class GodotSignalDodgeEnv(gym.Env):
             raise ValueError(f"connect_timeout_s must be > 0, got {connect_timeout_s}")
         if step_timeout_s <= 0:
             raise ValueError(f"step_timeout_s must be > 0, got {step_timeout_s}")
+        if observation_mode not in ("state", "pixel", "both"):
+            raise ValueError(
+                f"observation_mode must be one of 'state', 'pixel', 'both', "
+                f"got {observation_mode!r}"
+            )
+        for _name, _val in (
+            ("pixel_width", pixel_width),
+            ("pixel_height", pixel_height),
+            ("pixel_channels", pixel_channels),
+        ):
+            if not isinstance(_val, int) or isinstance(_val, bool) or _val <= 0:
+                raise ValueError(f"{_name} must be positive int, got {_val!r}")
+        # Headless rejection per docs/sight-h4-plan.md section 1: caller
+        # intent must be honored or rejected, not silently transformed.
+        # The H4 spike (docs/sight-h4-spike.md) proved Godot 4.6.2's
+        # --headless dummy display server does not emit
+        # RenderingServer.frame_post_draw, so pixel/both modes cannot
+        # produce viewport captures under headless. Reject at construction
+        # rather than at first reset() so the failure is loud and early.
+        if observation_mode in ("pixel", "both") and bool(headless):
+            raise ValueError(
+                f"observation_mode={observation_mode!r} requires headless=False "
+                f"(windowed Godot launch); got headless=True. The H4 spike "
+                f"(docs/sight-h4-spike.md) blocks --headless pixel capture."
+            )
 
         self._godot_executable = Path(godot_executable)
         self._project_path = Path(project_path)
@@ -182,13 +211,36 @@ class GodotSignalDodgeEnv(gym.Env):
         self._step_timeout_s = float(step_timeout_s)
         self._init_seed = seed
         self._headless = bool(headless)
+        self._observation_mode = observation_mode
+        self._pixel_width = int(pixel_width)
+        self._pixel_height = int(pixel_height)
+        self._pixel_channels = int(pixel_channels)
         self._transport_factory = transport_factory or _default_transport_factory
         self._process_factory = process_factory or _default_process_factory
 
         self.action_space = gym.spaces.Discrete(3)
-        self.observation_space = gym.spaces.Box(
+        # Observation space dispatched on observation_mode per
+        # docs/sight-h4-plan.md section 1. State mode is unchanged from H3
+        # (Box(-1,1,(10,),float32)). Pixel mode is uint8 channel-first to
+        # match SB3 NatureCNN's expected input. Both mode wraps them in a
+        # Dict so callers can train on either stream or both.
+        _state_space = gym.spaces.Box(
             low=-1.0, high=1.0, shape=(10,), dtype=np.float32
         )
+        _pixel_space = gym.spaces.Box(
+            low=0,
+            high=255,
+            shape=(self._pixel_channels, self._pixel_height, self._pixel_width),
+            dtype=np.uint8,
+        )
+        if observation_mode == "state":
+            self.observation_space = _state_space
+        elif observation_mode == "pixel":
+            self.observation_space = _pixel_space
+        else:  # "both"
+            self.observation_space = gym.spaces.Dict(
+                {"state": _state_space, "pixel": _pixel_space}
+            )
 
         # Process / transport state. None until first reset().
         self._proc: subprocess.Popen | None = None
