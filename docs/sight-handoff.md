@@ -6,7 +6,7 @@ Canonical handoff document. Updated at the end of every session by whoever execu
 
 **Phase:** H3 CLOSED via Grok GREEN verdict on 2026-05-09; closure artifact at `docs/grok-h3-final-green.md` with verbatim verdict text. H4 implementation authorized. H4 plan amended in this docs commit with three caveat-driven changes (headless rejection at construction, pixel metadata schema, step-by-step trajectory equality). H4 Step 1 (env constructor extension) is the immediate next code slice.
 
-**Last commit:** `__SUBSTANTIVE_HASH__` docs(h3,h4): record h3 grok green closure and amend h4 plan with caveats
+**Last commit:** `2a4d1c6` docs(h3,h4): record h3 grok green closure and amend h4 plan with caveats
 
 **Current task:** H3 closure recorded. H4 plan amendments landed (sections 1, 4 wire-payload schema, 9 determinism, 10 criterion 6). Repo `main` is the docs-only checkpoint before H4 code. Next slice is H4 Step 1: extend `GodotSignalDodgeEnv` with `observation_mode` and pixel constructor args, default `state` mode unchanged, reject `headless=True` for `pixel`/`both` modes per the new plan section 1 rule.
 
