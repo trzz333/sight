@@ -66,6 +66,12 @@ REQUIRED_FIELDS_HELLO: Final[frozenset[str]] = frozenset(
 REQUIRED_FIELDS_RESET: Final[frozenset[str]] = frozenset(
     {"type", FIELD_PROTOCOL_VERSION, "run_id", "episode_id", "seed", "max_steps"}
 )
+# Optional H4 fields on the H3 reset request (docs/sight-h4-plan.md sec 7).
+# Absent fields preserve H3 byte-compatible behavior (state mode, default
+# pixel dims). Senders MAY include these; receivers MUST tolerate absence.
+OPTIONAL_FIELDS_RESET_OBSERVATION_MODE: Final[frozenset[str]] = frozenset(
+    {"observation_mode", "pixel_width", "pixel_height", "pixel_channels"}
+)
 REQUIRED_FIELDS_STEP: Final[frozenset[str]] = frozenset(
     {"type", FIELD_PROTOCOL_VERSION, "run_id", "episode_id", "seq", "action"}
 )
@@ -151,6 +157,54 @@ ERROR_CODE_EPISODE_ID_MISMATCH: Final[str] = "episode_id_mismatch"
 ERROR_CODE_BAD_REQUEST: Final[str] = "bad_request"
 ERROR_CODE_INTERNAL: Final[str] = "internal"
 
+# --- H4 observation-mode literals ----------------------------------------
+# Wire-level string literals. Mirror tcp_controller.gd OBS_MODE_* constants.
+# State-mode wire is unchanged from H3 (length-10 numeric list). Pixel-mode
+# wire is the structured dict schema in REQUIRED_FIELDS_PIXEL_OBS below.
+
+OBS_MODE_STATE: Final[str] = "state"
+OBS_MODE_PIXEL: Final[str] = "pixel"
+OBS_MODE_BOTH: Final[str] = "both"
+
+VALID_OBSERVATION_MODES: Final[frozenset[str]] = frozenset(
+    {OBS_MODE_STATE, OBS_MODE_PIXEL, OBS_MODE_BOTH}
+)
+
+# --- H4 pixel-obs payload schema -----------------------------------------
+# Per docs/sight-h4-plan.md Decision 4. Pixel mode reset_ok / step_result
+# replace the H3 length-10 list at field "obs" with a dict carrying the
+# fields below. State mode is unchanged.
+
+OBS_DTYPE_UINT8: Final[str] = "uint8"
+OBS_ENCODING_FLAT_UINT8: Final[str] = "flat_uint8"
+
+# Source-of-pixels literal. Per H3-to-H4 closure caveats and the H4 spike
+# (docs/sight-h4-spike.md), the only authorized default for H4 is option 2
+# (windowed Godot viewport API). Other values indicate fallback paths and
+# require explicit Jeff approval before landing.
+PIXEL_SOURCE_GODOT_WINDOWED_VIEWPORT: Final[str] = "godot_windowed_viewport"
+
+# Capture-point literal. The synchronization barrier proven by the spike.
+CAPTURE_POINT_FRAME_POST_DRAW: Final[str] = "RenderingServer.frame_post_draw"
+
+# Required keys inside an "obs" dict for pixel mode. The Python transport
+# validates these on every receive when the active observation_mode is
+# "pixel" (and "both" once that mode lands).
+REQUIRED_FIELDS_PIXEL_OBS: Final[frozenset[str]] = frozenset(
+    {
+        "mode",
+        "shape",
+        "dtype",
+        "encoding",
+        "data",
+        "pixel_source",
+        "capture_point",
+        "headless_allowed",
+        "viewport_width",
+        "viewport_height",
+    }
+)
+
 
 __all__ = [
     "H3_PROTOCOL_VERSION",
@@ -184,4 +238,14 @@ __all__ = [
     "ERROR_CODE_EPISODE_ID_MISMATCH",
     "ERROR_CODE_BAD_REQUEST",
     "ERROR_CODE_INTERNAL",
+    "OBS_MODE_STATE",
+    "OBS_MODE_PIXEL",
+    "OBS_MODE_BOTH",
+    "VALID_OBSERVATION_MODES",
+    "OPTIONAL_FIELDS_RESET_OBSERVATION_MODE",
+    "REQUIRED_FIELDS_PIXEL_OBS",
+    "OBS_DTYPE_UINT8",
+    "OBS_ENCODING_FLAT_UINT8",
+    "PIXEL_SOURCE_GODOT_WINDOWED_VIEWPORT",
+    "CAPTURE_POINT_FRAME_POST_DRAW",
 ]

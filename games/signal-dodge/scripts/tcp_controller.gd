@@ -78,6 +78,32 @@ const ACTION_DISCRETE_LEFT := 0
 const ACTION_DISCRETE_STAY := 1
 const ACTION_DISCRETE_RIGHT := 2
 
+# H4 observation-mode literals. Mirror sight_agent.protocol.OBS_MODE_*.
+# State mode is the H3-default wire shape (length-10 numeric list).
+# Pixel and both modes are H4-introduced and require the structured
+# obs payload defined in docs/sight-h4-plan.md Decision 4. The pixel
+# capture path is not yet implemented in Godot; H4 Step 2 (this code)
+# accepts the protocol fields, validates them, and rejects pixel/both
+# modes at reset time with bad_request so the caller cannot reach a
+# half-implemented path. Step 4 (per the H4 plan implementation
+# sequence) is where pixel emission lands.
+const OBS_MODE_STATE := "state"
+const OBS_MODE_PIXEL := "pixel"
+const OBS_MODE_BOTH := "both"
+
+const FIELD_OBSERVATION_MODE := "observation_mode"
+const FIELD_PIXEL_WIDTH := "pixel_width"
+const FIELD_PIXEL_HEIGHT := "pixel_height"
+const FIELD_PIXEL_CHANNELS := "pixel_channels"
+
+# Default pixel dims when observation_mode is set without explicit dims
+# (the env layer always sends explicit dims, but the Godot side defaults
+# safely so a malformed payload from a future caller is not silently
+# accepted). 84/84/1 mirrors the env constructor defaults.
+const DEFAULT_PIXEL_WIDTH := 84
+const DEFAULT_PIXEL_HEIGHT := 84
+const DEFAULT_PIXEL_CHANNELS := 1
+
 var _server := TCPServer.new()
 var _peer: StreamPeerTCP = null
 var _recv_buf := PackedByteArray()
@@ -107,6 +133,15 @@ var _mode: int = MODE_UNSET
 # the first reset. Step 2 only field-validates; episode_id mismatch detection lands later.
 var _h3_episode_id := ""
 
+# Active H4 observation mode for the current episode, locked at the most recent valid
+# reset. Defaults to OBS_MODE_STATE so a reset that omits the H4 fields preserves H3
+# byte-compatible behavior. Pixel/both modes are protocol-accepted but rejected at
+# reset (see _h3_handle_reset) until the pixel source lands in H4 Step 4.
+var _h3_observation_mode := OBS_MODE_STATE
+var _h3_pixel_width := DEFAULT_PIXEL_WIDTH
+var _h3_pixel_height := DEFAULT_PIXEL_HEIGHT
+var _h3_pixel_channels := DEFAULT_PIXEL_CHANNELS
+
 # Single-slot pending H3 request. Empty dict means "no pending request". Populated when a
 # valid `reset` or `step` arrives in H3 mode; consumed by main.gd via take_pending_h3_request().
 # A second pending request before the slot is consumed is a protocol violation -> error
@@ -133,6 +168,20 @@ func run_id() -> String:
 
 func h3_episode_id() -> String:
 	return _h3_episode_id
+
+# H4 accessors: active observation mode and pixel dims for the current
+# episode. Defaults preserve H3 state behavior. Set by _h3_handle_reset.
+func h3_observation_mode() -> String:
+	return _h3_observation_mode
+
+func h3_pixel_width() -> int:
+	return _h3_pixel_width
+
+func h3_pixel_height() -> int:
+	return _h3_pixel_height
+
+func h3_pixel_channels() -> int:
+	return _h3_pixel_channels
 
 # True iff a valid H3 reset/step request is parked and waiting for main.gd to consume it.
 func has_pending_h3_request() -> bool:
@@ -337,13 +386,126 @@ func _h3_handle_reset(msg: Dictionary) -> void:
 	if not _pending_request.is_empty():
 		send_error(ERROR_BAD_REQUEST, "pipeline overrun: previous request unhandled")
 		return
+
+	# H4 optional fields. Defaults preserve H3 state-mode behavior. Per
+	# docs/sight-h4-plan.md sec 7, observation_mode is optional on the
+	# reset request; pixel dims are honored only when mode is set. The
+	# Python env always sends all four together when mode is set, so a
+	# partial set on the wire is treated as a protocol error to keep
+	# misuse loud. Validation rules:
+	#   - observation_mode (if present) must be a String and one of
+	#     {state, pixel, both}.
+	#   - pixel_width / pixel_height / pixel_channels (if present) must
+	#     be positive ints. JSON.parse_string widens integers to
+	#     TYPE_FLOAT in Godot 4.6.2; accept both TYPE_INT and TYPE_FLOAT
+	#     and round-trip through int() the way protocol_version does.
+	#   - If observation_mode is absent, pixel dims must also be absent.
+	#   - If observation_mode is present, all three pixel dims must be
+	#     present.
+	#   - Pixel and both modes are accepted at the protocol level but
+	#     rejected here with bad_request because the pixel source is
+	#     not yet implemented (H4 plan implementation step 4). Failing
+	#     at reset is correct: it prevents the engine from advancing
+	#     into a half-implemented mode where step responses cannot
+	#     fulfill the pixel-obs contract.
+	var has_mode := msg.has(FIELD_OBSERVATION_MODE)
+	var has_w := msg.has(FIELD_PIXEL_WIDTH)
+	var has_h := msg.has(FIELD_PIXEL_HEIGHT)
+	var has_c := msg.has(FIELD_PIXEL_CHANNELS)
+	var any_pixel_dim := has_w or has_h or has_c
+
+	if not has_mode and any_pixel_dim:
+		send_error(ERROR_BAD_REQUEST,
+			"pixel dims provided without observation_mode; either send all four together or none")
+		return
+
+	var requested_mode := OBS_MODE_STATE
+	var requested_w := DEFAULT_PIXEL_WIDTH
+	var requested_h := DEFAULT_PIXEL_HEIGHT
+	var requested_c := DEFAULT_PIXEL_CHANNELS
+
+	if has_mode:
+		var mode_value: Variant = msg.get(FIELD_OBSERVATION_MODE)
+		if typeof(mode_value) != TYPE_STRING:
+			send_error(ERROR_BAD_REQUEST,
+				"observation_mode must be string, got type %d" % typeof(mode_value))
+			return
+		var mode_str := str(mode_value)
+		if mode_str != OBS_MODE_STATE and mode_str != OBS_MODE_PIXEL and mode_str != OBS_MODE_BOTH:
+			send_error(ERROR_BAD_REQUEST,
+				"unknown observation_mode: %s; must be one of state, pixel, both" % mode_str)
+			return
+		if not (has_w and has_h and has_c):
+			send_error(ERROR_BAD_REQUEST,
+				"observation_mode requires all three pixel dims (pixel_width, pixel_height, pixel_channels)")
+			return
+		var w_ok := _h3_parse_positive_int(msg.get(FIELD_PIXEL_WIDTH))
+		var h_ok := _h3_parse_positive_int(msg.get(FIELD_PIXEL_HEIGHT))
+		var c_ok := _h3_parse_positive_int(msg.get(FIELD_PIXEL_CHANNELS))
+		if w_ok < 0:
+			send_error(ERROR_BAD_REQUEST,
+				"pixel_width must be positive int, got %s" % str(msg.get(FIELD_PIXEL_WIDTH)))
+			return
+		if h_ok < 0:
+			send_error(ERROR_BAD_REQUEST,
+				"pixel_height must be positive int, got %s" % str(msg.get(FIELD_PIXEL_HEIGHT)))
+			return
+		if c_ok < 0:
+			send_error(ERROR_BAD_REQUEST,
+				"pixel_channels must be positive int, got %s" % str(msg.get(FIELD_PIXEL_CHANNELS)))
+			return
+		requested_mode = mode_str
+		requested_w = w_ok
+		requested_h = h_ok
+		requested_c = c_ok
+
+	# Pixel source not yet implemented. Refuse pixel/both at reset so
+	# main.gd is never asked to emit pixel obs from a half-built path.
+	# State mode falls through to the H3 happy path unchanged.
+	if requested_mode != OBS_MODE_STATE:
+		send_error(ERROR_BAD_REQUEST,
+			"observation_mode=%s not yet implemented in this build; pixel source lands in H4 step 4" % requested_mode)
+		return
+
+	# Lock active mode and dims for this episode. Mid-episode mode change
+	# is structurally impossible because step requests do not carry mode
+	# fields and the next mode change can only occur on the next reset.
+	_h3_observation_mode = requested_mode
+	_h3_pixel_width = requested_w
+	_h3_pixel_height = requested_h
+	_h3_pixel_channels = requested_c
+
 	_h3_episode_id = str(msg.get("episode_id", ""))
 	_pending_request = msg.duplicate()
 	SightLog.log_event("controller_reset_received", _decorate({
 		"episode_id": _h3_episode_id,
 		"seed": int(msg.get("seed", 0)),
 		"max_steps": int(msg.get("max_steps", 0)),
+		FIELD_OBSERVATION_MODE: _h3_observation_mode,
+		FIELD_PIXEL_WIDTH: _h3_pixel_width,
+		FIELD_PIXEL_HEIGHT: _h3_pixel_height,
+		FIELD_PIXEL_CHANNELS: _h3_pixel_channels,
 	}))
+
+# Returns the parsed positive int on success, -1 on type mismatch or
+# non-positive value. Accepts TYPE_INT and TYPE_FLOAT (widened by Godot
+# 4.6.2 JSON.parse_string), rejecting TYPE_BOOL and other types. Float
+# values must be whole numbers; partial floats indicate a non-int wire
+# payload and are rejected.
+func _h3_parse_positive_int(value: Variant) -> int:
+	var t := typeof(value)
+	if t == TYPE_BOOL:
+		return -1
+	if t != TYPE_INT and t != TYPE_FLOAT:
+		return -1
+	if t == TYPE_FLOAT:
+		var f := float(value)
+		if f != floor(f):
+			return -1
+	var n := int(value)
+	if n <= 0:
+		return -1
+	return n
 
 func _h3_handle_step(msg: Dictionary) -> void:
 	if not _h3_validate_required_fields(msg,

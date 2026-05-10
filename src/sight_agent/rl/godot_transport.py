@@ -116,6 +116,19 @@ class GodotH3Transport:
         self._buf: bytes = b""
         self._episode_id: str = ""
         self._seq: int = 0
+        # Active observation mode set by the most recent successful reset.
+        # ``None`` until the first reset. Determines how _validate_obs
+        # parses the response's ``obs`` field. State mode is the H3
+        # default (length-10 numeric list); pixel/both modes are the H4
+        # structured dict per docs/sight-h4-plan.md Decision 4. Set to
+        # OBS_MODE_STATE on a no-mode-arg reset so legacy callers retain
+        # H3 byte-compatible behavior end-to-end.
+        self._observation_mode: str | None = None
+        # Pixel dims locked at reset time; used by _validate_obs to assert
+        # incoming pixel-obs shape matches what the env requested.
+        self._pixel_width: int = 0
+        self._pixel_height: int = 0
+        self._pixel_channels: int = 0
 
     # --- lifecycle ---------------------------------------------------------
 
@@ -159,6 +172,21 @@ class GodotH3Transport:
         """Active episode_id, or empty string before the first reset."""
         return self._episode_id
 
+    @property
+    def observation_mode(self) -> str | None:
+        """Active observation mode set by the most recent successful reset.
+
+        ``None`` before the first reset. After a no-mode-arg reset this is
+        ``OBS_MODE_STATE`` so callers can introspect the H3-default path
+        explicitly rather than treating None and "state" as identical.
+        """
+        return self._observation_mode
+
+    @property
+    def pixel_dims(self) -> tuple[int, int, int]:
+        """(channels, height, width) locked at the last reset; (0,0,0) before."""
+        return (self._pixel_channels, self._pixel_height, self._pixel_width)
+
     # --- public wire methods ----------------------------------------------
 
     def send_hello(self) -> None:
@@ -172,11 +200,29 @@ class GodotH3Transport:
         }
         self._send_line(msg)
 
-    def reset(self, seed: int, max_steps: int, episode_id: str) -> dict[str, Any]:
+    def reset(
+        self,
+        seed: int,
+        max_steps: int,
+        episode_id: str,
+        *,
+        observation_mode: str | None = None,
+        pixel_width: int | None = None,
+        pixel_height: int | None = None,
+        pixel_channels: int | None = None,
+    ) -> dict[str, Any]:
         """Send ``reset`` and block for exactly one ``reset_ok`` (or ``error``).
 
         Validates the response shape, run_id, episode_id, and obs vector.
         Rewinds the local seq counter to 0 only on success.
+
+        H4 extension (docs/sight-h4-plan.md sec 7): when
+        ``observation_mode`` is provided, the mode and pixel dims are sent
+        on the wire as optional fields and locked on the transport for
+        subsequent step-response obs validation. When all four kwargs are
+        ``None`` (the default), the wire payload is byte-compatible with
+        H3 and the active mode is locked to OBS_MODE_STATE so step
+        responses still validate as length-10 numeric lists.
         """
         if isinstance(seed, bool) or not isinstance(seed, int):
             raise ValueError(f"seed must be int, got {type(seed).__name__}")
@@ -189,7 +235,67 @@ class GodotH3Transport:
         if not isinstance(episode_id, str) or episode_id == "":
             raise ValueError("episode_id must be a non-empty string")
 
-        msg = {
+        # H4 mode/dim validation. The pixel-dim args are coupled to mode:
+        # they are honored when mode is set and required (with defaults
+        # filled by the env layer); they are rejected when mode is None
+        # so callers cannot accidentally drift into a half-configured
+        # state. The env layer (godot_env.GodotSignalDodgeEnv) is the
+        # only authorized caller that supplies these kwargs.
+        active_mode: str = protocol.OBS_MODE_STATE
+        active_w: int = 0
+        active_h: int = 0
+        active_c: int = 0
+        wire_extras: dict[str, Any] = {}
+        if observation_mode is not None:
+            if observation_mode not in protocol.VALID_OBSERVATION_MODES:
+                raise ValueError(
+                    f"observation_mode must be one of "
+                    f"{sorted(protocol.VALID_OBSERVATION_MODES)}, "
+                    f"got {observation_mode!r}"
+                )
+            for _name, _val in (
+                ("pixel_width", pixel_width),
+                ("pixel_height", pixel_height),
+                ("pixel_channels", pixel_channels),
+            ):
+                if _val is None:
+                    raise ValueError(
+                        f"{_name} is required when observation_mode is set; "
+                        f"got None"
+                    )
+                if (
+                    isinstance(_val, bool)
+                    or not isinstance(_val, int)
+                    or _val <= 0
+                ):
+                    raise ValueError(
+                        f"{_name} must be positive int, got {_val!r}"
+                    )
+            active_mode = observation_mode
+            active_c = int(pixel_channels)  # type: ignore[arg-type]
+            active_h = int(pixel_height)  # type: ignore[arg-type]
+            active_w = int(pixel_width)  # type: ignore[arg-type]
+            wire_extras = {
+                "observation_mode": active_mode,
+                "pixel_width": active_w,
+                "pixel_height": active_h,
+                "pixel_channels": active_c,
+            }
+        else:
+            # H3 byte-compatible reset payload. Reject any pixel-dim kwarg
+            # supplied without a mode so the caller's intent is explicit.
+            for _name, _val in (
+                ("pixel_width", pixel_width),
+                ("pixel_height", pixel_height),
+                ("pixel_channels", pixel_channels),
+            ):
+                if _val is not None:
+                    raise ValueError(
+                        f"{_name} provided without observation_mode; either "
+                        f"pass all four together or none"
+                    )
+
+        msg: dict[str, Any] = {
             "type": protocol.MSG_RESET,
             protocol.FIELD_PROTOCOL_VERSION: protocol.H3_PROTOCOL_VERSION,
             "run_id": self.run_id,
@@ -197,6 +303,7 @@ class GodotH3Transport:
             "seed": seed,
             "max_steps": max_steps,
         }
+        msg.update(wire_extras)
         self._send_line(msg)
         resp = self._recv_message()
         self._reject_if_error(resp)
@@ -211,7 +318,27 @@ class GodotH3Transport:
             raise GodotProtocolError(
                 f"episode_id mismatch on reset_ok: expected {episode_id!r}, got {resp_eid!r}"
             )
-        self._validate_obs(resp.get("obs"))
+        # Lock active mode and dims BEFORE validating obs so the
+        # validator sees what was just locked. Reset semantics: a failed
+        # response (raised below) leaves the prior locks intact, which
+        # is fine because the caller is expected to abandon this episode
+        # rather than reuse it.
+        prior_mode = self._observation_mode
+        prior_dims = (self._pixel_channels, self._pixel_height, self._pixel_width)
+        self._observation_mode = active_mode
+        self._pixel_channels = active_c
+        self._pixel_height = active_h
+        self._pixel_width = active_w
+        try:
+            self._validate_obs(resp.get("obs"))
+        except (GodotProtocolError, GodotTransportError):
+            # Roll back the lock so a follow-up reset() does not see
+            # half-applied state from a rejected response.
+            self._observation_mode = prior_mode
+            self._pixel_channels = prior_dims[0]
+            self._pixel_height = prior_dims[1]
+            self._pixel_width = prior_dims[2]
+            raise
         # Commit only after full validation. Failed reset leaves prior
         # episode_id (or "") untouched so a retry sees consistent state.
         self._episode_id = episode_id
@@ -381,6 +508,41 @@ class GodotH3Transport:
             )
 
     def _validate_obs(self, obs: Any) -> None:
+        """Dispatch obs validation on the active observation_mode.
+
+        State mode: H3 contract. ``obs`` is a JSON array of length 10 with
+        numeric (int or float) elements. Range is enforced upstream by
+        Godot's clamp; the transport's job is shape and dtype.
+
+        Pixel mode: ``obs`` is a JSON object carrying the H4 schema in
+        protocol.REQUIRED_FIELDS_PIXEL_OBS. Validates mode literal, shape
+        match against locked pixel dims, dtype literal, encoding literal,
+        data length and per-element range, plus the metadata fields
+        (pixel_source, capture_point, headless_allowed, viewport dims).
+
+        Both mode is not yet implemented at the wire level; if the
+        transport is asked to validate an obs while in OBS_MODE_BOTH, a
+        protocol error is raised so callers cannot silently mis-handle
+        the response.
+        """
+        mode = self._observation_mode
+        if mode is None or mode == protocol.OBS_MODE_STATE:
+            self._validate_state_obs(obs)
+            return
+        if mode == protocol.OBS_MODE_PIXEL:
+            self._validate_pixel_obs(obs)
+            return
+        if mode == protocol.OBS_MODE_BOTH:
+            raise GodotProtocolError(
+                "observation_mode='both' wire path not yet implemented at "
+                "the transport layer; use 'state' or 'pixel'"
+            )
+        raise GodotProtocolError(
+            f"unknown active observation_mode {mode!r}; expected one of "
+            f"{sorted(protocol.VALID_OBSERVATION_MODES)}"
+        )
+
+    def _validate_state_obs(self, obs: Any) -> None:
         if not isinstance(obs, list):
             raise GodotProtocolError(
                 f"obs must be JSON array, got {type(obs).__name__}"
@@ -391,6 +553,107 @@ class GodotH3Transport:
             if isinstance(v, bool) or not isinstance(v, (int, float)):
                 raise GodotProtocolError(
                     f"obs[{i}] must be numeric, got {type(v).__name__}"
+                )
+
+    def _validate_pixel_obs(self, obs: Any) -> None:
+        """Validate the H4 pixel-obs payload schema.
+
+        Per docs/sight-h4-plan.md Decision 4. The locked dims on the
+        transport (set at reset time) are the source of truth for the
+        expected shape. Wire-side ``shape`` is required to agree.
+        """
+        if not isinstance(obs, dict):
+            raise GodotProtocolError(
+                f"pixel obs must be JSON object, got {type(obs).__name__}"
+            )
+        missing = protocol.REQUIRED_FIELDS_PIXEL_OBS - obs.keys()
+        if missing:
+            raise GodotProtocolError(
+                f"pixel obs missing required fields: {sorted(missing)}"
+            )
+        wire_mode = obs.get("mode")
+        if wire_mode != protocol.OBS_MODE_PIXEL:
+            raise GodotProtocolError(
+                f"pixel obs mode must be {protocol.OBS_MODE_PIXEL!r}, "
+                f"got {wire_mode!r}"
+            )
+        wire_dtype = obs.get("dtype")
+        if wire_dtype != protocol.OBS_DTYPE_UINT8:
+            raise GodotProtocolError(
+                f"pixel obs dtype must be {protocol.OBS_DTYPE_UINT8!r}, "
+                f"got {wire_dtype!r}"
+            )
+        wire_encoding = obs.get("encoding")
+        if wire_encoding != protocol.OBS_ENCODING_FLAT_UINT8:
+            raise GodotProtocolError(
+                f"pixel obs encoding must be "
+                f"{protocol.OBS_ENCODING_FLAT_UINT8!r}, got {wire_encoding!r}"
+            )
+        # Shape is a JSON array; under JSON loads it is a Python list of ints.
+        wire_shape = obs.get("shape")
+        if not isinstance(wire_shape, list) or len(wire_shape) != 3:
+            raise GodotProtocolError(
+                f"pixel obs shape must be a 3-element JSON array, "
+                f"got {wire_shape!r}"
+            )
+        for i, v in enumerate(wire_shape):
+            if isinstance(v, bool) or not isinstance(v, int):
+                raise GodotProtocolError(
+                    f"pixel obs shape[{i}] must be int, got {type(v).__name__}"
+                )
+        expected_shape = [self._pixel_channels, self._pixel_height, self._pixel_width]
+        if list(wire_shape) != expected_shape:
+            raise GodotProtocolError(
+                f"pixel obs shape {list(wire_shape)} does not match locked "
+                f"dims {expected_shape}"
+            )
+        # Data must be a flat array of ints in [0, 255], length C*H*W.
+        wire_data = obs.get("data")
+        if not isinstance(wire_data, list):
+            raise GodotProtocolError(
+                f"pixel obs data must be JSON array, got {type(wire_data).__name__}"
+            )
+        expected_len = (
+            self._pixel_channels * self._pixel_height * self._pixel_width
+        )
+        if len(wire_data) != expected_len:
+            raise GodotProtocolError(
+                f"pixel obs data length {len(wire_data)} does not match "
+                f"expected C*H*W = {expected_len}"
+            )
+        # Per-element range check. Skip per-pixel iteration cost when data
+        # is empty (already short-circuited by the length check above).
+        for i, v in enumerate(wire_data):
+            if isinstance(v, bool) or not isinstance(v, int):
+                raise GodotProtocolError(
+                    f"pixel obs data[{i}] must be int, got {type(v).__name__}"
+                )
+            if v < 0 or v > 255:
+                raise GodotProtocolError(
+                    f"pixel obs data[{i}] out of [0,255]: {v}"
+                )
+        # Metadata literals. These are how reviewers audit the capture
+        # path from artifacts alone, so they are validated strictly.
+        if not isinstance(obs.get("pixel_source"), str):
+            raise GodotProtocolError(
+                f"pixel obs pixel_source must be str, got "
+                f"{type(obs.get('pixel_source')).__name__}"
+            )
+        if not isinstance(obs.get("capture_point"), str):
+            raise GodotProtocolError(
+                f"pixel obs capture_point must be str, got "
+                f"{type(obs.get('capture_point')).__name__}"
+            )
+        if not isinstance(obs.get("headless_allowed"), bool):
+            raise GodotProtocolError(
+                f"pixel obs headless_allowed must be bool, got "
+                f"{type(obs.get('headless_allowed')).__name__}"
+            )
+        for _name in ("viewport_width", "viewport_height"):
+            v = obs.get(_name)
+            if isinstance(v, bool) or not isinstance(v, int) or v <= 0:
+                raise GodotProtocolError(
+                    f"pixel obs {_name} must be positive int, got {v!r}"
                 )
 
 

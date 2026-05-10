@@ -321,11 +321,33 @@ class GodotSignalDodgeEnv(gym.Env):
         episode_id = f"ep-{self._episode_count:06d}"
 
         try:
-            resp = self._transport.reset(
-                seed=episode_seed,
-                max_steps=self._max_steps,
-                episode_id=episode_id,
-            )
+            if self._observation_mode == "state":
+                resp = self._transport.reset(
+                    seed=episode_seed,
+                    max_steps=self._max_steps,
+                    episode_id=episode_id,
+                )
+            elif self._observation_mode == "pixel":
+                resp = self._transport.reset(
+                    seed=episode_seed,
+                    max_steps=self._max_steps,
+                    episode_id=episode_id,
+                    observation_mode=self._observation_mode,
+                    pixel_width=self._pixel_width,
+                    pixel_height=self._pixel_height,
+                    pixel_channels=self._pixel_channels,
+                )
+            else:
+                # observation_mode == "both" is permitted at construction
+                # time so callers can introspect the env's intent, but the
+                # wire path is not yet implemented (docs/sight-h4-plan.md
+                # sec 1: "both" is optional and not required for H4
+                # closure). Fail loudly at the first reset so a misuse is
+                # immediate, not silent.
+                raise NotImplementedError(
+                    "observation_mode='both' is not yet implemented "
+                    "end-to-end; use 'state' or 'pixel'"
+                )
         except (GodotTransportError, GodotProtocolError, GodotRemoteError) as exc:
             # Transport / protocol failures must not be silently converted
             # into terminal observations. Caller decides whether to close
@@ -661,24 +683,75 @@ class GodotSignalDodgeEnv(gym.Env):
         except Exception:
             pass
 
-    def _obs_to_np(self, obs: list) -> np.ndarray:
-        """Convert wire-side JSON list to the numpy observation.
+    def _obs_to_np(self, obs: Any) -> np.ndarray:
+        """Convert wire-side ``obs`` payload to the numpy observation.
 
-        The transport already validated length 10 and numeric per element;
-        this method just dtype-casts. Out-of-range values are NOT clipped
-        here; the Godot side is contractually required to clamp to [-1, 1]
-        per docs/sight-h3-plan.md section 2 and the H3 step 4 obs builder.
-        Treating violation as a bug rather than silently masking it keeps
-        the contract enforceable.
+        Dispatches on ``self._observation_mode`` set at construction.
+
+        State mode: H3 contract. Wire ``obs`` is a length-10 numeric list
+        already validated by the transport. Returns ``np.ndarray`` of
+        shape ``(10,)`` and dtype ``float32``. Out-of-range values are
+        NOT clipped here; the Godot side is contractually required to
+        clamp to [-1, 1] per docs/sight-h3-plan.md section 2 and the H3
+        step 4 obs builder. Treating violation as a bug rather than
+        silently masking it keeps the contract enforceable.
+
+        Pixel mode: H4 contract. Wire ``obs`` is the dict schema in
+        ``protocol.REQUIRED_FIELDS_PIXEL_OBS`` already validated by the
+        transport. Returns ``np.ndarray`` of shape
+        ``(channels, height, width)`` and dtype ``uint8``. The
+        transport's prior validation guarantees the data length matches
+        ``C*H*W`` and every element is in ``[0, 255]``; this method
+        reshapes without re-validating.
+
+        Both mode: not implemented at the wire level. The reset path
+        already raises ``NotImplementedError`` before this method runs,
+        but if it is reached anyway (e.g., a fake transport injects a
+        dict), raise to make the gap loud.
         """
-        arr = np.asarray(obs, dtype=np.float32)
-        # Defensive shape check; transport guarantees this but a misbehaving
-        # fake transport in tests could violate it.
-        if arr.shape != (10,):
-            raise GodotProtocolError(
-                f"obs array has shape {arr.shape}, expected (10,)"
+        if self._observation_mode == "state":
+            if not isinstance(obs, list):
+                raise GodotProtocolError(
+                    f"state-mode obs must be JSON array, got "
+                    f"{type(obs).__name__}"
+                )
+            arr = np.asarray(obs, dtype=np.float32)
+            if arr.shape != (10,):
+                raise GodotProtocolError(
+                    f"obs array has shape {arr.shape}, expected (10,)"
+                )
+            return arr
+        if self._observation_mode == "pixel":
+            if not isinstance(obs, dict):
+                raise GodotProtocolError(
+                    f"pixel-mode obs must be JSON object, got "
+                    f"{type(obs).__name__}"
+                )
+            data = obs.get("data")
+            if not isinstance(data, list):
+                raise GodotProtocolError(
+                    f"pixel-mode obs.data must be JSON array, got "
+                    f"{type(data).__name__}"
+                )
+            shape = (
+                self._pixel_channels,
+                self._pixel_height,
+                self._pixel_width,
             )
-        return arr
+            expected_len = (
+                self._pixel_channels * self._pixel_height * self._pixel_width
+            )
+            if len(data) != expected_len:
+                raise GodotProtocolError(
+                    f"pixel-mode obs.data length {len(data)} does not "
+                    f"match expected C*H*W = {expected_len}"
+                )
+            arr = np.asarray(data, dtype=np.uint8).reshape(shape)
+            return arr
+        raise NotImplementedError(
+            f"observation_mode={self._observation_mode!r} not implemented "
+            f"at the env layer"
+        )
 
     def _build_info(
         self,
