@@ -323,8 +323,21 @@ func _h3_perform_soft_reset(req: Dictionary) -> void:
 	# the reset frame. tcp_controller has already validated required fields and
 	# stamped the active episode_id; the send helper stamps run_id / episode_id /
 	# protocol so wire keys cannot drift here.
+	# H4 step 4 robustness: detach pre-reset hazards from the scene
+	# tree synchronously rather than relying on queue_free's idle-time
+	# deletion. Without this synchronous detach, hazards accumulated
+	# by the pre-mode-lock autonomous loop (TCP mode but H3 not yet
+	# locked) linger in the scene tree past the reset's queue_free
+	# call, get rendered on the post-reset frame_post_draw, and break
+	# same-seed step-by-step pixel equality. The lingering count
+	# correlates with pre-mode-lock duration, which differs across
+	# runs by physics-tick scheduling jitter. Synchronous remove_child
+	# guarantees the renderer sees a hazard-free scene at capture
+	# time. queue_free still runs to release memory at idle.
 	for h in _hazards:
 		if is_instance_valid(h):
+			if h.is_inside_tree():
+				h.get_parent().remove_child(h)
 			h.queue_free()
 	_hazards.clear()
 	_frame_counter = 0
@@ -353,6 +366,15 @@ func _h3_perform_soft_reset(req: Dictionary) -> void:
 		"max_steps": _h3_max_steps,
 		"frame": _frame_counter,
 	}
+	# H4 step 4 robustness (continued): set the survival label to a
+	# deterministic post-reset string BEFORE the pixel capture awaits
+	# frame_post_draw. Without this ordering, the captured frame shows
+	# the last pre-mode-lock legacy-loop label text ("Survival: NN.NNs
+	# action=0"), where the elapsed time NN.NN is wall-clock-derived
+	# and varies across runs. Setting the deterministic text first
+	# ensures both same-seed runs render identical label glyphs at
+	# capture time.
+	_survival_label.text = "RESET seed=%d ep=%s" % [seed_value, episode_id]
 	# H4 step 3 obs branch. State mode preserves H3 byte-compat
 	# (length-10 numeric Array via send_reset_ok). Pixel mode awaits
 	# the next RenderingServer.frame_post_draw, captures the windowed
@@ -371,7 +393,6 @@ func _h3_perform_soft_reset(req: Dictionary) -> void:
 		_tcp.send_reset_ok_pixel(_frame_counter, pix_obs, false, false, info)
 	else:
 		_tcp.send_reset_ok(_frame_counter, _h3_build_observation(), false, false, info)
-	_survival_label.text = "RESET seed=%d ep=%s" % [seed_value, episode_id]
 
 func _h3_perform_step(req: Dictionary, delta: float) -> void:
 	# One consumed H3 step request advances exactly one physics frame and produces
