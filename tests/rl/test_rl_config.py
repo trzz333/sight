@@ -23,6 +23,7 @@ from sight_agent.rl.godot_config import (
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CFG = REPO_ROOT / "configs" / "rl" / "cartpole_ppo_h1.yaml"
 H3_GODOT_CFG = REPO_ROOT / "configs" / "rl" / "signal_dodge_ppo_h3.yaml"
+H4_GODOT_PIXEL_CFG = REPO_ROOT / "configs" / "rl" / "signal_dodge_ppo_h4_pixel.yaml"
 
 
 def test_default_h1_yaml_loads() -> None:
@@ -147,7 +148,11 @@ def test_resolve_godot_kwargs_resolves_relative_project_path(monkeypatch) -> Non
     monkeypatch.delenv("SIGHT_GODOT_PROJECT", raising=False)
     cfg = yaml.safe_load(H3_GODOT_CFG.read_text(encoding="utf-8"))
     extra = resolve_godot_kwargs(cfg)
-    assert set(extra.keys()) == {"godot_executable", "project_path"}
+    # godot_executable + project_path are always present for Godot configs.
+    # Additional keys (e.g. max_steps for H3, plus pixel/headless for H4)
+    # depend on what the YAML carries; see the dedicated H3 omission test
+    # and H4 passthrough test for those.
+    assert {"godot_executable", "project_path"}.issubset(extra.keys())
     # godot_executable null in YAML and env var unset -> None passed through.
     assert extra["godot_executable"] is None
     expected = (REPO_ROOT / "games" / "signal-dodge").resolve()
@@ -181,3 +186,78 @@ def test_resolve_godot_kwargs_yaml_overrides_env_var(monkeypatch, tmp_path: Path
     extra = resolve_godot_kwargs(cfg)
     assert extra["godot_executable"] == str(tmp_path / "yaml-godot.exe")
     assert extra["project_path"] == str(tmp_path / "yaml-project")
+
+
+# --- H4 Godot pixel config and resolver passthrough ---------------------
+
+
+def test_default_h4_godot_pixel_yaml_loads() -> None:
+    cfg = load_config(H4_GODOT_PIXEL_CFG)
+    assert cfg["run"]["phase"] == "H4"
+    assert cfg["run"]["name"] == "signal_dodge_ppo_h4_pixel"
+    assert cfg["run"]["seed"] == 0
+    assert cfg["env"]["id"] == "godot:signal-dodge-v0"
+    assert cfg["env"]["n_envs"] == 1
+    assert cfg["env"]["godot_executable"] is None
+    assert cfg["env"]["project_path"] == "games/signal-dodge"
+    assert cfg["env"]["max_steps"] == 1800
+    # Pixel mode must be windowed: YAML carries headless=false explicitly so
+    # the env construction does not silently flip to headless on a future
+    # default change.
+    assert cfg["env"]["headless"] is False
+    assert cfg["env"]["observation_mode"] == "pixel"
+    assert cfg["env"]["pixel_width"] == 84
+    assert cfg["env"]["pixel_height"] == 84
+    assert cfg["env"]["pixel_channels"] == 1
+    assert cfg["algo"]["framework"] == "stable-baselines3"
+    assert cfg["algo"]["name"] == "PPO"
+    assert cfg["algo"]["policy"] == "CnnPolicy"
+    assert cfg["algo"]["device"] == "cpu"
+    # Smoke-cheap PPO hyperparams baked into the config.
+    assert cfg["algo"]["hyperparams"]["n_steps"] == 64
+    assert cfg["algo"]["hyperparams"]["batch_size"] == 32
+    assert cfg["algo"]["hyperparams"]["n_epochs"] == 1
+    assert cfg["train"]["total_timesteps"] == 128
+    assert cfg["eval"]["eval_freq"] == 64
+    assert cfg["eval"]["n_eval_episodes"] == 1
+    assert cfg["eval"]["deterministic"] is True
+    assert cfg["logging"]["format"] == "ndjson"
+    assert cfg["checkpoint"]["enabled"] is True
+    assert cfg["checkpoint"]["filename"] == "model.zip"
+
+
+def test_resolve_godot_kwargs_returns_h4_optional_fields(monkeypatch) -> None:
+    """H4 YAML carries optional env-construction kwargs; resolver threads them."""
+    monkeypatch.delenv("SIGHT_GODOT_EXE", raising=False)
+    monkeypatch.delenv("SIGHT_GODOT_PROJECT", raising=False)
+    cfg = yaml.safe_load(H4_GODOT_PIXEL_CFG.read_text(encoding="utf-8"))
+    extra = resolve_godot_kwargs(cfg)
+    assert extra["godot_executable"] is None
+    assert Path(extra["project_path"]).is_absolute()
+    assert extra["max_steps"] == 1800
+    assert extra["headless"] is False
+    assert extra["observation_mode"] == "pixel"
+    assert extra["pixel_width"] == 84
+    assert extra["pixel_height"] == 84
+    assert extra["pixel_channels"] == 1
+
+
+def test_resolve_godot_kwargs_h3_omits_pixel_fields(monkeypatch) -> None:
+    """H3 YAML has max_steps but no pixel/headless fields; resolver omits the latter.
+
+    Locks in the "no invented defaults" rule: the resolver returns exactly
+    what the YAML carries plus the always-resolved path pair.
+    """
+    monkeypatch.delenv("SIGHT_GODOT_EXE", raising=False)
+    monkeypatch.delenv("SIGHT_GODOT_PROJECT", raising=False)
+    cfg = yaml.safe_load(H3_GODOT_CFG.read_text(encoding="utf-8"))
+    extra = resolve_godot_kwargs(cfg)
+    assert extra["max_steps"] == 1800
+    for key in (
+        "headless",
+        "observation_mode",
+        "pixel_width",
+        "pixel_height",
+        "pixel_channels",
+    ):
+        assert key not in extra, f"H3 resolver leaked {key!r}"

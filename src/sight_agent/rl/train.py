@@ -104,6 +104,30 @@ def main(argv: list[str] | None = None) -> int:
     return run(cfg, config_path=str(args.config))
 
 
+def _godot_smoke_obs_metadata(cfg: dict[str, Any]) -> tuple[tuple[int, ...], int]:
+    """Compute (obs_shape, action_n) for run_start without launching Godot.
+
+    H3 state mode preserves the historical Godot smoke shape ``(10,)`` and
+    ``action_n=3``. H4 pixel mode reports the configured pixel tensor shape
+    ``(pixel_channels, pixel_height, pixel_width)`` from the YAML so the
+    NDJSON run_start event reflects the actual observation contract that
+    will be exercised; this is purely metadata, the env is not constructed
+    here. ``observation_mode="both"`` is not yet implemented end-to-end at
+    the wire level (env raises on first reset), so this helper does not
+    emit a Dict-shape metadata payload; we fall back to the state shape so
+    run_start remains writable and a later end-to-end failure is the
+    binding signal rather than a smoke probe.
+    """
+    env_cfg = cfg.get("env", {}) if isinstance(cfg, dict) else {}
+    mode = env_cfg.get("observation_mode", "state") if isinstance(env_cfg, dict) else "state"
+    if mode == "pixel":
+        ch = int(env_cfg.get("pixel_channels", 1))
+        h = int(env_cfg.get("pixel_height", 84))
+        w = int(env_cfg.get("pixel_width", 84))
+        return (ch, h, w), 3
+    return (10,), 3
+
+
 def _build_train_env(cfg: dict[str, Any], artifacts: TrainArtifacts):
     """Construct the train VecEnv via ``make_env``, threading Godot kwargs.
 
@@ -194,8 +218,7 @@ def run(cfg: dict[str, Any], config_path: str = "<inline>") -> int:
     # ``gym.make(env_id)`` directly which would launch Godot. The factory
     # path used by train/eval already covers env construction.
     if is_godot_env_id(env_id):
-        obs_shape: tuple[int, ...] = (10,)
-        action_n = 3
+        obs_shape, action_n = _godot_smoke_obs_metadata(cfg)
     else:
         obs_shape, action_n = smoke_check_env(env_id, seed)
 

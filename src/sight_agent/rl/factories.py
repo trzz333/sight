@@ -46,6 +46,12 @@ def make_env(
     run_dir: str | os.PathLike[str] | None = None,
     godot_executable: str | os.PathLike[str] | None = None,
     project_path: str | os.PathLike[str] | None = None,
+    max_steps: int | None = None,
+    headless: bool | None = None,
+    observation_mode: str | None = None,
+    pixel_width: int | None = None,
+    pixel_height: int | None = None,
+    pixel_channels: int | None = None,
 ) -> VecEnv:
     """Build a VecEnv for train or eval.
 
@@ -69,6 +75,12 @@ def make_env(
         project_path: keyword-only. Path to the Godot project. If unset,
             ``SIGHT_GODOT_PROJECT`` is consulted, then the repo-root-relative
             ``games/signal-dodge`` is used as a final fallback.
+        max_steps, headless, observation_mode, pixel_width, pixel_height,
+        pixel_channels: keyword-only optional pass-throughs forwarded to
+            ``GodotSignalDodgeEnv`` only when non-None. Ignored for
+            Gymnasium ids. ``None`` means "let the env constructor pick
+            its default," preserving H3-era behavior when these are
+            omitted by the resolver.
     """
     if mode not in ("train", "eval"):
         raise ValueError(f"mode must be 'train' or 'eval', got {mode!r}")
@@ -83,6 +95,12 @@ def make_env(
             run_dir=run_dir,
             godot_executable=godot_executable,
             project_path=project_path,
+            max_steps=max_steps,
+            headless=headless,
+            observation_mode=observation_mode,
+            pixel_width=pixel_width,
+            pixel_height=pixel_height,
+            pixel_channels=pixel_channels,
         )
 
     if _looks_like_gymnasium(env_id):
@@ -174,8 +192,14 @@ def _make_godot_signal_dodge_v0(
     run_dir: str | os.PathLike[str] | None,
     godot_executable: str | os.PathLike[str] | None,
     project_path: str | os.PathLike[str] | None,
+    max_steps: int | None = None,
+    headless: bool | None = None,
+    observation_mode: str | None = None,
+    pixel_width: int | None = None,
+    pixel_height: int | None = None,
+    pixel_channels: int | None = None,
 ) -> VecEnv:
-    """H3 step 7: build a single-env ``DummyVecEnv`` wrapping ``GodotSignalDodgeEnv``.
+    """H3 step 7 + H4 step 6: build a single-env ``DummyVecEnv`` wrapping ``GodotSignalDodgeEnv``.
 
     Lazy-imports the env to keep Gymnasium-only training paths from importing
     the Godot transport. Resolves Godot paths with the precedence:
@@ -184,7 +208,7 @@ def _make_godot_signal_dodge_v0(
         > (project_path only) repo-root-relative ``games/signal-dodge``
 
     Env vars do not override explicit kwargs. The factory does not parse YAML;
-    that is step 8's job.
+    that is the plumbing layer's job (``godot_config.resolve_godot_kwargs``).
 
     ``run_dir`` is passed through to the env unchanged. The factory does not
     add train/eval suffixes; episode evidence files are owned by the env.
@@ -192,6 +216,13 @@ def _make_godot_signal_dodge_v0(
     Eval seeding mirrors the Gymnasium branch: ``seed`` for train, ``seed +
     10_000`` for eval. The effective seed is threaded both into the env
     constructor (used at first ``reset()``) and through ``VecEnv.seed``.
+
+    H4 optional kwargs (``max_steps``, ``headless``, ``observation_mode``,
+    ``pixel_width``, ``pixel_height``, ``pixel_channels``) are forwarded to
+    the env constructor only when non-None. ``None`` means "let the env
+    pick its default," preserving H3-era construction shape when the
+    resolver omitted the key. This also means a YAML that explicitly sets
+    ``headless: null`` cannot override the env default with ``None``.
     """
     if n_envs != 1:
         raise ValueError(
@@ -220,12 +251,29 @@ def _make_godot_signal_dodge_v0(
 
     effective_seed = int(seed) if mode == "train" else int(seed) + 10_000
 
+    # Filter out None values so we never override the env constructor's own
+    # default with a literal None. The H3-era call shape is exactly
+    # ``{godot_executable, project_path, run_dir, seed}``; when all H4
+    # optional kwargs are omitted by the resolver this set is unchanged.
+    extra_env_kwargs: dict[str, Any] = {}
+    for _name, _val in (
+        ("max_steps", max_steps),
+        ("headless", headless),
+        ("observation_mode", observation_mode),
+        ("pixel_width", pixel_width),
+        ("pixel_height", pixel_height),
+        ("pixel_channels", pixel_channels),
+    ):
+        if _val is not None:
+            extra_env_kwargs[_name] = _val
+
     def _factory() -> GodotSignalDodgeEnv:
         return GodotSignalDodgeEnv(
             godot_executable=exe,
             project_path=proj,
             run_dir=run_dir,
             seed=effective_seed,
+            **extra_env_kwargs,
         )
 
     vec_env = DummyVecEnv([_factory])

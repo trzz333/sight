@@ -1,0 +1,64 @@
+run:
+  phase: H4
+  name: signal_dodge_ppo_h4_pixel
+  seed: 0
+  out_dir: runs/rl
+
+env:
+  id: godot:signal-dodge-v0
+  n_envs: 1
+  # Local Godot binary on disk. Left null in the committed config so the
+  # repo stays portable. Resolution at run time prefers this YAML value,
+  # then falls back to the SIGHT_GODOT_EXE env var.
+  godot_executable: null
+  # Repo-root-relative project path, resolved against the repo root by
+  # ``sight_agent.rl.godot_config`` before being passed to ``make_env``.
+  project_path: games/signal-dodge
+  # Episode budget. 30 seconds at 60 Hz, matches GodotSignalDodgeEnv default.
+  max_steps: 1800
+  # Windowed Godot launch is mandatory for pixel mode per
+  # docs/sight-h4-plan.md section 1 and the H4 spike: --headless dummy
+  # display server does not emit RenderingServer.frame_post_draw so
+  # viewport capture cannot run under headless. The env constructor
+  # rejects (observation_mode in {pixel,both}) AND headless=True.
+  headless: false
+  # H4 pixel contract per docs/sight-h4-plan.md section 1 + Decision 3:
+  # uint8 channel-first (1, 84, 84) grayscale frames. Channel-first matches
+  # SB3 NatureCNN convolution input expectations.
+  observation_mode: pixel
+  pixel_width: 84
+  pixel_height: 84
+  pixel_channels: 1
+
+algo:
+  framework: stable-baselines3
+  name: PPO
+  # CnnPolicy is required for the H4 pixel observation space; MlpPolicy
+  # would silently flatten the (1, 84, 84) tensor and degrade learning.
+  policy: CnnPolicy
+  device: cpu
+  # Smoke-cheap PPO values. n_steps=64 keeps the rollout small enough to
+  # finish on StrongerJr; batch_size=32 (=n_steps/2) gives two minibatches
+  # per epoch; n_epochs=1 limits compute per rollout. H4 acceptance is
+  # "constructs and runs while writing artifacts," not "learns."
+  hyperparams:
+    n_steps: 64
+    batch_size: 32
+    n_epochs: 1
+
+train:
+  # Smoke-sized. Two rollouts at n_steps=64 reach the eval boundary at
+  # step 64 and complete at step 128.
+  total_timesteps: 128
+
+eval:
+  eval_freq: 64
+  n_eval_episodes: 1
+  deterministic: true
+
+logging:
+  format: ndjson
+
+checkpoint:
+  enabled: true
+  filename: model.zip

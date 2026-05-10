@@ -20,6 +20,7 @@ from sight_agent.rl.artifacts import TrainArtifacts
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 H3_GODOT_CFG = REPO_ROOT / "configs" / "rl" / "signal_dodge_ppo_h3.yaml"
+H4_GODOT_PIXEL_CFG = REPO_ROOT / "configs" / "rl" / "signal_dodge_ppo_h4_pixel.yaml"
 H1_CARTPOLE_CFG = REPO_ROOT / "configs" / "rl" / "cartpole_ppo_h1.yaml"
 
 
@@ -140,3 +141,69 @@ def test_build_train_env_skips_godot_kwargs_for_cartpole(
         assert "godot_executable" not in call
         assert "project_path" not in call
         assert "run_dir" not in call
+
+
+def test_build_train_and_eval_env_pass_h4_pixel_kwargs(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """H4 YAML must thread pixel + headless + max_steps to make_env for both modes.
+
+    Asserts the load-bearing H4-mode shape:
+      - observation_mode="pixel"
+      - headless=False (windowed Godot launch, required for viewport capture)
+      - pixel dims (channels, height, width) = (1, 84, 84)
+      - max_steps=1800 carries through (the H3-era resolver value)
+      - both train and eval calls carry these kwargs (eval is not a
+        smaller cartpole-style probe; it must hit the same pixel surface
+        the policy was trained against)
+      - distinct run_dir per mode (<run_dir>/godot-train vs godot-eval)
+    """
+    monkeypatch.delenv("SIGHT_GODOT_EXE", raising=False)
+    monkeypatch.delenv("SIGHT_GODOT_PROJECT", raising=False)
+    monkeypatch.setenv("SIGHT_GODOT_EXE", str(tmp_path / "godot.exe"))
+    calls = _install_recording_make_env(monkeypatch)
+
+    cfg = yaml.safe_load(H4_GODOT_PIXEL_CFG.read_text(encoding="utf-8"))
+    artifacts = _make_artifacts(tmp_path)
+
+    train_mod._build_train_env(cfg, artifacts)
+    train_mod._build_eval_env(cfg, artifacts)
+
+    assert len(calls) == 2
+    train_call, eval_call = calls
+    for call, expected_mode in ((train_call, "train"), (eval_call, "eval")):
+        assert call["env_id"] == "godot:signal-dodge-v0"
+        assert call["mode"] == expected_mode
+        assert call["godot_executable"] == str(tmp_path / "godot.exe")
+        assert Path(call["project_path"]).is_absolute()
+        assert call["observation_mode"] == "pixel"
+        assert call["headless"] is False
+        assert call["pixel_width"] == 84
+        assert call["pixel_height"] == 84
+        assert call["pixel_channels"] == 1
+        assert call["max_steps"] == 1800
+
+    # eval always single env regardless of env.n_envs
+    assert train_call["n_envs"] == 1
+    assert eval_call["n_envs"] == 1
+
+    # Distinct run_dir per mode; same parent.
+    assert Path(train_call["run_dir"]).name == "godot-train"
+    assert Path(eval_call["run_dir"]).name == "godot-eval"
+    assert Path(train_call["run_dir"]).parent == Path(eval_call["run_dir"]).parent
+
+
+def test_godot_smoke_obs_metadata_returns_pixel_shape_for_h4(tmp_path: Path) -> None:
+    """``run_start`` env_smoke must report (1,84,84) for H4 pixel without launching Godot."""
+    cfg = yaml.safe_load(H4_GODOT_PIXEL_CFG.read_text(encoding="utf-8"))
+    obs_shape, action_n = train_mod._godot_smoke_obs_metadata(cfg)
+    assert obs_shape == (1, 84, 84)
+    assert action_n == 3
+
+
+def test_godot_smoke_obs_metadata_returns_state_shape_for_h3(tmp_path: Path) -> None:
+    """``run_start`` env_smoke must still report (10,) for H3 state mode."""
+    cfg = yaml.safe_load(H3_GODOT_CFG.read_text(encoding="utf-8"))
+    obs_shape, action_n = train_mod._godot_smoke_obs_metadata(cfg)
+    assert obs_shape == (10,)
+    assert action_n == 3
