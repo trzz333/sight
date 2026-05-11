@@ -89,7 +89,7 @@ All commits pushed to `origin/main` at
 this acceptance round.
 
 (Substantive HEAD hash for the packet-landing commit: patched into
-this section when this packet's commit lands. Placeholder `0e96bfe`.)
+this section when this packet's commit lands. Placeholder `9e4bbae`.)
 
 ## 4. Default test gate
 
