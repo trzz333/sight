@@ -552,7 +552,15 @@ class GodotSignalDodgeEnv(gym.Env):
         if self._run_dir is not None:
             log_path = Path(self._run_dir) / "godot.ndjson"
             log_path.parent.mkdir(parents=True, exist_ok=True)
-            env["SIGHT_GODOT_LOG_PATH"] = str(log_path)
+            # Pass an absolute path: Godot 4.6.2's File API resolves
+            # relative paths against the project working directory
+            # (``--path`` arg), not against the caller's CWD. A relative
+            # ``runs\rl\...\godot-train\godot.ndjson`` ended up at
+            # ``games\signal-dodge\runs\rl\...\godot-train\godot.ndjson``
+            # during H4 live smoke. Resolving here keeps the file
+            # alongside python.ndjson regardless of how the trainer was
+            # invoked.
+            env["SIGHT_GODOT_LOG_PATH"] = str(log_path.resolve())
 
         # Persist the launch cmd so ``_connect_transport`` can include it in
         # early-exit diagnostics. Captured before the factory call so a

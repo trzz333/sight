@@ -16,6 +16,7 @@ when given an unsupported request.
 from __future__ import annotations
 
 import os
+import socket
 from pathlib import Path
 from typing import Any
 
@@ -251,9 +252,21 @@ def _make_godot_signal_dodge_v0(
 
     effective_seed = int(seed) if mode == "train" else int(seed) + 10_000
 
+    # Each factory-built Godot env gets its own kernel-assigned loopback
+    # TCP port so train and in-train eval can run simultaneously without
+    # colliding on the historical 127.0.0.1:8765 default. Discovered by
+    # the H4 live smoke: with eval_freq=64 the SB3 callback resets the
+    # eval env while the train Godot subprocess still owns 8765, and
+    # Godot's tcp_controller.gd surfaces a WSAEINVAL (22) on listen()
+    # before the eval env's recv_timeout expires. Allocating per env at
+    # construction time is the smallest correct fix; tests that need a
+    # specific port still bypass the factory and construct
+    # ``GodotSignalDodgeEnv`` directly with ``tcp_port=...``.
+    tcp_port = _allocate_isolated_tcp_port()
+
     # Filter out None values so we never override the env constructor's own
     # default with a literal None. The H3-era call shape is exactly
-    # ``{godot_executable, project_path, run_dir, seed}``; when all H4
+    # ``{godot_executable, project_path, run_dir, seed, tcp_port}``; when all H4
     # optional kwargs are omitted by the resolver this set is unchanged.
     extra_env_kwargs: dict[str, Any] = {}
     for _name, _val in (
@@ -273,6 +286,7 @@ def _make_godot_signal_dodge_v0(
             project_path=proj,
             run_dir=run_dir,
             seed=effective_seed,
+            tcp_port=tcp_port,
             **extra_env_kwargs,
         )
 
@@ -288,6 +302,26 @@ def _make_godot_signal_dodge_v0(
         # on a non-load-bearing seed propagation path.
         pass
     return vec_env
+
+
+def _allocate_isolated_tcp_port() -> int:
+    """Bind ``127.0.0.1:0``, capture the kernel-assigned port, then release.
+
+    Mirrors ``tests/rl/test_h3_godot_smoke._allocate_isolated_tcp_port``.
+    The TOCTOU window between releasing the socket and Godot binding the
+    same port is negligible on loopback inside one dev box; the env's
+    ``connect_timeout_s`` retry covers transient races. The same caller
+    must NOT cache and reuse the port for a second simultaneous env;
+    each Godot env instance gets its own freshly-allocated port so
+    train and in-train eval cannot collide on 127.0.0.1:8765 (the
+    historical default that broke H4 live smoke until this slice).
+    """
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        s.bind(("127.0.0.1", 0))
+        return int(s.getsockname()[1])
+    finally:
+        s.close()
 
 
 def _default_signal_dodge_project_path() -> str:
