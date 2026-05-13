@@ -373,6 +373,29 @@ class GodotSignalDodgeEnv(gym.Env):
             terminated=bool(resp.get("terminated")),
             truncated=bool(resp.get("truncated")),
         )
+        # Pre-H5 hardening: persist pixel-obs metadata once per reset so the
+        # capture-path audit can be done from artifacts alone (python.ndjson)
+        # rather than relying on source-code inspection plus
+        # transport-validation-survival. State mode does not need this
+        # because state-obs is a length-10 numeric list with no metadata.
+        # "both" mode is rejected earlier in reset(); no event is emitted.
+        # Only metadata is logged; obs.data is deliberately omitted so the
+        # NDJSON does not balloon with per-reset pixel arrays.
+        if self._observation_mode == "pixel":
+            pixel_obs = resp["obs"]
+            self._log_event(
+                "obs_metadata",
+                episode_id=episode_id,
+                observation_mode=self._observation_mode,
+                shape=list(pixel_obs["shape"]),
+                dtype=pixel_obs["dtype"],
+                encoding=pixel_obs["encoding"],
+                pixel_source=pixel_obs["pixel_source"],
+                capture_point=pixel_obs["capture_point"],
+                headless_allowed=pixel_obs["headless_allowed"],
+                viewport_width=pixel_obs["viewport_width"],
+                viewport_height=pixel_obs["viewport_height"],
+            )
         return obs, info
 
     def step(

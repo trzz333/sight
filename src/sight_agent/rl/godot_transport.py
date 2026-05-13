@@ -655,6 +655,31 @@ class GodotH3Transport:
                 raise GodotProtocolError(
                     f"pixel obs {_name} must be positive int, got {v!r}"
                 )
+        # Metadata literal pinning. Type checks above ensure these are the
+        # right primitive types; here we pin the only authorized values per
+        # docs/sight-h4-plan.md Decision 2 and Decision 4 plus
+        # docs/sight-h4-spike.md. Any deviation is a wire contract
+        # violation, not a silent fallback. Pre-H5 hardening: audits relying
+        # on python.ndjson + transport survival must be able to assume these
+        # values rather than re-derive them from source-code inspection.
+        if obs["pixel_source"] != protocol.PIXEL_SOURCE_GODOT_WINDOWED_VIEWPORT:
+            raise GodotProtocolError(
+                f"pixel obs pixel_source must be "
+                f"{protocol.PIXEL_SOURCE_GODOT_WINDOWED_VIEWPORT!r}, "
+                f"got {obs['pixel_source']!r}"
+            )
+        if obs["capture_point"] != protocol.CAPTURE_POINT_FRAME_POST_DRAW:
+            raise GodotProtocolError(
+                f"pixel obs capture_point must be "
+                f"{protocol.CAPTURE_POINT_FRAME_POST_DRAW!r}, "
+                f"got {obs['capture_point']!r}"
+            )
+        if obs["headless_allowed"] is not False:
+            raise GodotProtocolError(
+                f"pixel obs headless_allowed must be False (pixel mode "
+                f"requires a windowed Godot launch per "
+                f"docs/sight-h4-spike.md); got {obs['headless_allowed']!r}"
+            )
 
 
 __all__ = [

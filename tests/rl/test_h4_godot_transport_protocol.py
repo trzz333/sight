@@ -481,6 +481,58 @@ def test_pixel_obs_rejects_bad_pixel_source_type(server, transport):
     )
 
 
+# --- pixel-obs metadata literal pinning (pre-H5 hardening) ---------------
+
+
+def test_pixel_obs_rejects_wrong_pixel_source_literal(server, transport):
+    """Pre-H5 hardening: pixel_source must equal the single authorized
+    literal. A wrong-but-string value is a wire contract violation."""
+    _bad_pixel_reset_test(
+        server,
+        transport,
+        lambda p: p["obs"].update({"pixel_source": "godot_offscreen_viewport"}),
+    )
+
+
+def test_pixel_obs_rejects_wrong_capture_point_literal(server, transport):
+    """Pre-H5 hardening: capture_point must equal the single authorized
+    literal. The H4 spike proved frame_post_draw is the required barrier."""
+    _bad_pixel_reset_test(
+        server,
+        transport,
+        lambda p: p["obs"].update({"capture_point": "RenderingServer.frame_pre_draw"}),
+    )
+
+
+def test_pixel_obs_rejects_headless_allowed_true(server, transport):
+    """Pre-H5 hardening: headless_allowed must be False. The H4 spike
+    proved Godot 4.6.2's --headless dummy display server does not emit
+    frame_post_draw, so pixel mode requires a windowed launch."""
+    _bad_pixel_reset_test(
+        server,
+        transport,
+        lambda p: p["obs"].update({"headless_allowed": True}),
+    )
+
+
+def test_pixel_obs_accepts_canonical_literals(server, transport):
+    """Sanity: the unmutated payload (canonical literals + False) still
+    validates. Guards against the literal-pinning patch accidentally
+    rejecting the production wire contract."""
+    server.queue_response(
+        _pixel_reset_ok(
+            "test-run", "ep-1",
+            channels=1, height=84, width=84, fill=0,
+        )
+    )
+    transport.reset(
+        seed=0, max_steps=100, episode_id="ep-1",
+        observation_mode=protocol.OBS_MODE_PIXEL,
+        pixel_width=84, pixel_height=84, pixel_channels=1,
+    )
+    assert transport.observation_mode == protocol.OBS_MODE_PIXEL
+
+
 # --- failed reset rolls back lock ----------------------------------------
 
 

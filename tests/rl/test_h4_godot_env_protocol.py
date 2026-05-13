@@ -16,6 +16,8 @@ Run:
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -131,6 +133,7 @@ def _make_env(
     pixel_width: int = 84,
     pixel_height: int = 84,
     pixel_channels: int = 1,
+    run_dir: Path | None = None,
 ):
     if transport is None:
         transport = _ModeRecordingFakeTransport(
@@ -144,6 +147,7 @@ def _make_env(
         godot_executable=_GODOT_EXE,
         project_path=_PROJECT,
         tcp_port=0,
+        run_dir=run_dir,
         observation_mode=observation_mode,
         headless=headless,
         pixel_width=pixel_width,
@@ -291,3 +295,125 @@ def test_obs_to_np_pixel_mode_rejects_data_length_mismatch():
     with pytest.raises(Exception, match="length"):
         env._obs_to_np(payload)
     env.close()
+
+
+# --- pixel-mode obs_metadata NDJSON persistence (pre-H5 hardening) -------
+
+
+def _read_python_ndjson(run_dir: Path) -> list[dict]:
+    """Read and JSON-parse every line of python.ndjson under run_dir.
+
+    Returns an empty list if the file does not exist so tests can assert
+    on absence cleanly. One JSON object per line per the
+    ``_NdjsonWriter`` contract in godot_env._NdjsonWriter.
+    """
+    path = run_dir / "python.ndjson"
+    if not path.exists():
+        return []
+    lines = [ln for ln in path.read_text(encoding="utf-8").splitlines() if ln.strip()]
+    return [json.loads(ln) for ln in lines]
+
+
+def test_pixel_reset_writes_python_ndjson(tmp_path):
+    """Pixel-mode reset must materialize python.ndjson under run_dir so
+    artifact-only audits have evidence to inspect."""
+    env, tx, _ = _make_env(observation_mode="pixel", run_dir=tmp_path)
+    tx.queue_reset(_pixel_reset_payload())
+    env.reset(seed=0)
+    env.close()
+    assert (tmp_path / "python.ndjson").exists()
+
+
+def test_pixel_reset_emits_exactly_one_obs_metadata_event(tmp_path):
+    """Per-reset metadata persistence: exactly one ``obs_metadata`` event
+    per reset call. Two resets => two events; this test pins the
+    one-per-reset cadence."""
+    env, tx, _ = _make_env(observation_mode="pixel", run_dir=tmp_path)
+    tx.queue_reset(_pixel_reset_payload())
+    env.reset(seed=0)
+    env.close()
+    events = _read_python_ndjson(tmp_path)
+    obs_meta = [e for e in events if e.get("type") == "obs_metadata"]
+    assert len(obs_meta) == 1, (
+        f"expected exactly one obs_metadata event, got {len(obs_meta)}: "
+        f"{[e.get('type') for e in events]}"
+    )
+
+
+def test_obs_metadata_event_has_listed_fields(tmp_path):
+    """The obs_metadata event must carry every field the H5 audit will
+    rely on. The ``_log_event`` decorator also adds run_id / godot_pid /
+    tcp_port; here we assert the explicit obs-metadata fields plus
+    run_id (the decorator's most load-bearing addition)."""
+    env, tx, _ = _make_env(observation_mode="pixel", run_dir=tmp_path)
+    tx.queue_reset(_pixel_reset_payload(c=1, h=84, w=84, fill=7))
+    env.reset(seed=0)
+    env.close()
+    events = _read_python_ndjson(tmp_path)
+    obs_meta = next(e for e in events if e.get("type") == "obs_metadata")
+    # Auto-decorated identity field (sanity check that the decorator path
+    # is active for this event type, not just ``reset`` events).
+    assert "run_id" in obs_meta
+    # Explicit metadata payload required by the H5 plan acceptance audit.
+    assert obs_meta["episode_id"] == "ep-000001"
+    assert obs_meta["observation_mode"] == "pixel"
+    assert obs_meta["shape"] == [1, 84, 84]
+    assert obs_meta["dtype"] == protocol.OBS_DTYPE_UINT8
+    assert obs_meta["encoding"] == protocol.OBS_ENCODING_FLAT_UINT8
+    assert obs_meta["pixel_source"] == protocol.PIXEL_SOURCE_GODOT_WINDOWED_VIEWPORT
+    assert obs_meta["capture_point"] == protocol.CAPTURE_POINT_FRAME_POST_DRAW
+    assert obs_meta["headless_allowed"] is False
+    assert obs_meta["viewport_width"] == 1280
+    assert obs_meta["viewport_height"] == 720
+
+
+def test_obs_metadata_event_omits_data(tmp_path):
+    """The metadata event must NOT include the pixel data array; logging
+    the raw frame per reset would balloon NDJSON size and defeat the
+    point of a metadata-only audit trail."""
+    env, tx, _ = _make_env(observation_mode="pixel", run_dir=tmp_path)
+    tx.queue_reset(_pixel_reset_payload(c=1, h=84, w=84, fill=42))
+    env.reset(seed=0)
+    env.close()
+    events = _read_python_ndjson(tmp_path)
+    obs_meta = next(e for e in events if e.get("type") == "obs_metadata")
+    assert "data" not in obs_meta, (
+        "obs_metadata event leaked obs.data; this defeats metadata-only "
+        f"audit trail. keys: {sorted(obs_meta.keys())}"
+    )
+
+
+def test_state_mode_reset_emits_no_obs_metadata_event(tmp_path):
+    """State mode does not produce obs metadata on the wire; the env
+    must not emit an obs_metadata event for state-mode resets. Pins the
+    pixel-mode gating on the new log site."""
+    env, tx, _ = _make_env(observation_mode="state", run_dir=tmp_path)
+    tx.queue_reset(_reset_ok_payload())
+    env.reset(seed=0)
+    env.close()
+    events = _read_python_ndjson(tmp_path)
+    obs_meta = [e for e in events if e.get("type") == "obs_metadata"]
+    assert obs_meta == [], (
+        f"state-mode reset emitted obs_metadata events: {obs_meta}"
+    )
+
+
+def test_pixel_reset_emits_two_obs_metadata_events_after_two_resets(tmp_path):
+    """Cadence pin: a second reset must emit a second obs_metadata event.
+    Confirms the log site is per-reset, not first-reset-only."""
+    env, tx, _ = _make_env(observation_mode="pixel", run_dir=tmp_path)
+    tx.queue_reset(_pixel_reset_payload())
+    tx.queue_reset(_pixel_reset_payload(fill=99))
+    env.reset(seed=0)
+    env.reset(seed=1)
+    env.close()
+    events = _read_python_ndjson(tmp_path)
+    obs_meta = [e for e in events if e.get("type") == "obs_metadata"]
+    assert len(obs_meta) == 2, (
+        f"expected two obs_metadata events across two resets, got "
+        f"{len(obs_meta)}"
+    )
+    # Each event carries its own episode_id so downstream audits can
+    # correlate metadata to a specific episode.
+    assert obs_meta[0]["episode_id"] == "ep-000001"
+    assert obs_meta[1]["episode_id"] == "ep-000002"
