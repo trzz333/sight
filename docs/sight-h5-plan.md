@@ -88,10 +88,38 @@ path. Any per-policy branching is recorded in the eval summary.
 
 ## 5. Non-saturation rule
 
-If the negative controls (stay-only, seeded random, untrained
-`CnnPolicy`) mostly reach `max_steps / 1800` in the configured Signal
-Dodge profile, the current profile is too easy and the H5 learning
-signal will be drowned. In that case:
+The negative controls (stay-only, seeded random, untrained
+`CnnPolicy`) must not saturate the configured Signal Dodge profile.
+If they do, the profile is too easy and the H5 learning signal will
+be drowned.
+
+### Threshold (canonical)
+
+A negative control is **saturated** on the configured profile if
+either of the following holds across the eval seed set:
+
+- `timeout_rate >= 0.50`, OR
+- `mean_episode_length >= 0.80 * max_steps`.
+
+The Signal Dodge profile **fails the H5 non-saturation gate** if any
+of the three negative controls (stay-only, seeded random, untrained
+`CnnPolicy`) is saturated by this rule.
+
+The exact threshold values used must be recorded in each policy's
+evaluation summary under `non_saturation_thresholds`, and the
+per-profile pass/fail decision must be recorded under
+`saturation_decision` in the H5 evaluation index. Changing the
+threshold is a docs-level amendment to this section, not a runtime
+knob.
+
+Training a CnnPolicy against a saturated profile is explicitly
+disallowed as H5 learning evidence; any reward / length / collision
+gap measured against a saturated negative-control floor is not
+interpretable as learning.
+
+### On failure
+
+If the profile fails the non-saturation gate:
 
 - H5 MUST add a harder Signal Dodge profile (higher hazard density,
   shorter spawn intervals, faster moving hazards) OR a successor
