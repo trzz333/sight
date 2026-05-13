@@ -4,20 +4,23 @@ Canonical handoff document. Updated at the end of every session by whoever execu
 
 ---
 
-**Phase:** H4 closed GREEN by Grok. H5 is now authorized under the existing charter but not started. The H4 closure record is at `docs/grok-h4-final-green.md`; the H4 evidence packet is at `docs/grok-h4-phase-gate-packet.md`. Grok found no blocking defects; two metadata items (literal-pinning in `godot_transport.py`, NDJSON metadata persistence in `godot_env.py`) are tracked as pre-H5 hardening candidates, not blockers.
+**Phase:** H5 planning, pre-H5 hardening landed. H4 closed GREEN by Grok per `docs/grok-h4-final-green.md`. The two pre-H5 hardening items called out in section 6 of the closure doc are now implemented and tested (transport literal-pinning, per-reset NDJSON obs metadata persistence). H5 plan is committed at `docs/sight-h5-plan.md`. H5 implementation is authorized but not started; baseline / evaluation suite is GPT's next planning target.
 
-**Last commit:** `7f377e6` docs(h4): record grok h4 green verdict and prepare for h5 planning
+**Last commit:** `9c80fec` feat(rl): harden h4 pixel metadata before h5 planning
 
-**Current task:** H4 closure recorded. Prepare H5 planning. No code work in this round.
+**Current task:** H5 baseline / evaluation implementation not started.
 
-**Next action:** GPT scopes the H5 plan (learning evaluation of the small CNN policy on Signal Dodge or its successor microgame). Two pre-H5 hardening items are open and may be folded into H5 setup, run as a parallel cleanup slice, or deferred with the caveats explicitly recorded: (1) pin `pixel_source == "godot_windowed_viewport"`, `capture_point == "RenderingServer.frame_post_draw"`, `headless_allowed == False` literal values in `src/sight_agent/rl/godot_transport.py`; (2) persist the obs metadata dict once per reset to `python.ndjson` from `src/sight_agent/rl/godot_env.py`. Both are small patches. Decision is GPT's framing then Jeff's call.
+**Next action:** Implement the H5 baseline evaluation suite per `docs/sight-h5-plan.md` sections 3 through 6 (four-policy baseline, multi-seed eval posture, non-saturation check, 25% reward-or-length / 20pp collision-rate GREEN bar). Implementation prompt to be authored by GPT.
 
-**Blockers:** none for H4 closure or H5 entry.
+**Blockers:** none.
 
 **Notes:**
 
-- Grok GREEN with no blocking defects. All 11 acceptance criteria from `docs/sight-h4-plan.md` section 10 satisfied. Charter invariants hold with zero drift.
-- Pre-H5 hardening candidates flagged but not blocking: literal-value pinning in transport, per-reset metadata persistence to NDJSON. Recommended follow-up only.
-- Operational reminders from H4 carry forward: pytest live trajectory test needs `-s` under Desktop Commander; `SIGHT_GODOT_EXE` must be set inline because Desktop Commander does not inherit User-scope env vars; `runs/` stays gitignored.
-- Eval mean_reward of 1800.0 in H4 training pair is NOT a learning signal. Learning quality is H5's gate.
-- Pre-mode-lock physics-tick variance carries forward from H3. Same-seed reproducibility assertions apply only to post-mode-lock observations.
+- Transport literal-pinning lands in `_validate_pixel_obs` after the existing type checks: `pixel_source == PIXEL_SOURCE_GODOT_WINDOWED_VIEWPORT`, `capture_point == CAPTURE_POINT_FRAME_POST_DRAW`, `headless_allowed is False`. Any deviation raises `GodotProtocolError`.
+- Pixel-mode `env.reset()` now emits one `obs_metadata` NDJSON event per reset with the full metadata set (no `obs.data`). State mode emits nothing new. Audits can run from `python.ndjson` alone.
+- `pytest tests/rl --tb=short -q` is 238 passed / 2 deselected (was 228 / 2 at H4 closure). Targeted slice (transport + env protocol tests) is 54 passed.
+- H5 plan at `docs/sight-h5-plan.md` enforces a non-saturation rule: if negative controls (stay-only, seeded random, untrained `CnnPolicy`) mostly reach `max_steps`, the current Signal Dodge profile is too easy and must be hardened or replaced before H5 closure.
+- Operational constraints carry forward: `-s` for live pytest under Desktop Commander, inline `SIGHT_GODOT_EXE`, `runs/` gitignored, pre-mode-lock physics-tick variance applies only to pre-lock observations.
+
+
+---
