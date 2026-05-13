@@ -6,7 +6,7 @@ Canonical handoff document. Updated at the end of every session by whoever execu
 
 **Phase:** H4 closed GREEN by Grok. H5 is now authorized under the existing charter but not started. The H4 closure record is at `docs/grok-h4-final-green.md`; the H4 evidence packet is at `docs/grok-h4-phase-gate-packet.md`. Grok found no blocking defects; two metadata items (literal-pinning in `godot_transport.py`, NDJSON metadata persistence in `godot_env.py`) are tracked as pre-H5 hardening candidates, not blockers.
 
-**Last commit:** <patched after push>
+**Last commit:** `7f377e6` docs(h4): record grok h4 green verdict and prepare for h5 planning
 
 **Current task:** H4 closure recorded. Prepare H5 planning. No code work in this round.
 
