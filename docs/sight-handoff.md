@@ -4,20 +4,20 @@ Canonical handoff document. Updated at the end of every session by whoever execu
 
 ---
 
-**Phase:** H5 (collision-propagation bug fixed; non-saturation gate now PASSES on the H4 pixel profile)
+**Phase:** H5 (first trained-CnnPolicy slice produced; NOT closure-grade)
 
-**Last commit:** `fa30dbf` chore: refresh handoff to locked schema
+**Last commit:** `f80489b` docs(h5): trained-policy phase B 2048-timestep evidence slice
 
-**Current task:** The GDScript collision-propagation bug from `docs/h5-collision-propagation-bug.md` is fixed at `30d220d`. `_h3_perform_step` no longer wipes the H3 terminal flags at start-of-step; the sticky flag set by `_on_player_died` now reaches Python on the next step reply. Post-fix smoke on the H4 pixel profile shows all three negative controls terminate well below the 0.80 length-ratio threshold (stay_only=303.0, seeded_random=349.5, untrained_cnn=303.0; timeout_rate=0.0 for all three).
+**Current task:** First H5 trained-CnnPolicy evidence slice landed. 2048-timestep PPO CnnPolicy training on the existing H4 pixel Signal Dodge profile produced a model that beats negative controls by ~14% on reward and length and ~10pp on collision rate. This is BELOW the H5 section 6 GREEN bar (25% / 25% / 20pp). Profile saturation gate passes cleanly. Findings written to `docs/h5-trained-policy-phase-b-evidence.md`.
 
-**Next action:** GPT decides whether the next H5 slice is the trained-CnnPolicy training run on the existing H4 pixel profile, or whether closure-margin headroom (H5 plan section 6: 25% reward gap, 20pp collision-rate reduction) still motivates profile hardening. The corrected smoke shows Step 2B as originally scoped is solving a problem the data no longer shows.
+**Next action:** GPT decides training budget for the next H5 slice. Primary blocker is insufficient training (32 PPO updates is far below typical pixel-CNN budgets). Recommended: 10K-50K timestep training run on the same H4 pixel profile, same 10-seed full-mode eval, then re-check section 6 GREEN bars. Step 2B (profile hardening) remains unjustified; profile headroom is ample (best negative-control length_ratio = 0.337).
 
-**Blockers:** none.
+**Blockers:** none operational. Open: training budget call for next slice belongs to GPT.
 
 **Notes:**
 
-- Post-fix live verification (seeds 1000,1001): `python.ndjson` for `godot-eval-stay_only` shows 606 step events, 2 with `terminated=true terminal_reason="collision"` (one per seed), episode_id progresses `ep-000001` to `ep-000003`. Pre-fix: 3600 step events all `terminated=false`, stuck `ep-000001`.
-- `test_live_godot_pixel_same_seed_step_by_step_trajectory_equality` and `test_live_godot_reset_and_100_step_smoke` both PASSED post-fix; H3/H4 determinism preserved.
-- `pytest tests/rl` default tier post-fix: 290 passed, 0 failed, 2 deselected. Includes 4 new tests in `tests/rl/test_h5_collision_propagation.py` covering the between-step contract, reset clear, env-layer step-after-terminal guard, and `GodotRemoteError` propagation.
-- Step 2B status: halt lifted but no longer obviously needed; the original "100% saturation" Step 2A-lite result was a measurement artifact of the propagation bug. The H4 pixel profile already provides a usable non-saturation floor.
-- Carry-forward operational invariants unchanged: `SIGHT_GODOT_EXE` must be set inline in a `.bat` for live tests; pre-mode-lock physics-tick variance remains out of scope for same-seed determinism; `runs/` stays gitignored; ethics armor unchanged.
+- Exact commands used: training `python -m sight_agent.rl.train --config configs/rl/signal_dodge_ppo_h4_pixel.yaml --total-timesteps 2048 --run-id h5_train_phase_b_2048`; eval `python -m sight_agent.rl.h5_baseline_cli --config configs/rl/signal_dodge_ppo_h4_pixel.yaml --run-id h5_eval_phase_b_10seed --seeds 1000-1009 --mode full --train-run-dir runs/rl/signal_dodge_ppo_h4_pixel/h5_train_phase_b_2048`. Artifacts under `runs/rl/signal_dodge_ppo_h4_pixel/h5_train_phase_b_2048/` and `runs/rl/signal_dodge_ppo_h4_pixel/h5_eval_phase_b_10seed/evaluation/`.
+- 10-seed aggregate means (seeds 1000-1009): stay_only=606.0 length / 1.0 collision, seeded_random=414.3 / 1.0, untrained_cnn=606.0 / 1.0, trained_cnn=689.7 / 0.9. Trained vs best negative control: +13.8% length, +13.9% reward, 10pp collision-rate reduction. Saturation gate passes (all negative-control length_ratio <= 0.337, max threshold 0.80).
+- `untrained_cnn` produces byte-identical per-seed trajectories to `stay_only` across all 10 seeds. The deterministic argmax of a randomly-initialized SB3 PPO CnnPolicy collapses to action 1 (stay). Practically the H5 negative-control suite delivers 2 independent baselines on this profile, not 3. Already anticipated by `docs/sight-h5-plan.md` section 1; worth flagging for GPT when sizing the next slice.
+- No code changes this session. Existing `sight_agent.rl.train` (produces `model.zip`) and `sight_agent.rl.h5_baseline_cli --mode full --train-run-dir <path>` (evaluates all 4 policies including trained_cnn) cover the full slice end-to-end. No targeted tests required; default `tests/rl` and H3/H4 same-seed determinism re-check intentionally deferred since no code paths were touched and live-Godot test budget was spent on training and eval.
+- `SIGHT_GODOT_EXE` was set inline in the live cmd.exe session to `C:\Users\maste\AppData\Local\Microsoft\WinGet\Packages\GodotEngine.GodotEngine_Microsoft.Winget.Source_8wekyb3d8bbwe\Godot_v4.6.2-stable_win64.exe`. The User-scope env var currently points at the `_console.exe` variant, which is fine for CLI but the inline setting matches the path used by the H4 pixel-determinism live tests.
