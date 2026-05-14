@@ -412,11 +412,16 @@ func _h3_perform_step(req: Dictionary, delta: float) -> void:
 		return
 	var mapped: int = _h3_map_action(action_wire)
 	_h3_last_move_x = mapped
-	# Reset per-step terminal flags. _on_player_died (in the H3 branch above) sets
-	# these synchronously inside the move_action() call below if a collision occurs.
-	_h3_step_terminated = false
-	_h3_terminal_reason = ""
-	_h3_collision_info = {}
+	# H5 collision-propagation fix (docs/h5-collision-propagation-bug.md).
+	# Do NOT reset _h3_step_terminated / _h3_terminal_reason / _h3_collision_info
+	# at the start of a step. _on_player_died can fire on hazard physics ticks
+	# BETWEEN Python step requests (the player's Area2D body_entered signal is
+	# driven by Godot's physics tick, not by move_action). If we reset here,
+	# the between-step collision is silently wiped before line "var terminated"
+	# reads it, and the step reply goes out with terminated=false. Instead,
+	# the flag is sticky from _on_player_died until _h3_perform_soft_reset
+	# clears it on the next reset. _h3_episode_done gates further steps so
+	# only one terminal step_result can be produced per collision.
 	# 1. Advance frame counter.
 	_frame_counter += 1
 	# 2. World step: advance hazards, cull offscreen.

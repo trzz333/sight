@@ -150,3 +150,45 @@ hard pixel YAML. None of that landed; the diagnostic killed the slice
 upstream. Once the propagation bug is fixed and the H4 profile's
 non-saturation result is re-measured truthfully, the decision on
 whether to harden the profile is a separate, downstream question.
+
+
+## Fix result
+
+Implemented in `games/signal-dodge/scripts/main.gd::_h3_perform_step`: the
+unconditional start-of-step reset of `_h3_step_terminated`,
+`_h3_terminal_reason`, and `_h3_collision_info` was removed. Reset
+clearing remains in `_h3_perform_soft_reset`. The terminal flag is now
+sticky from `_on_player_died` until the next soft reset, so a
+between-step hazard-physics-tick collision is consumed by the very next
+step reply as `terminated=True terminal_reason="collision" reward=0.0`.
+`_h3_episode_done` continues to gate step-after-terminal with
+`bad_request`.
+
+Live verification on StrongerJr (Godot 4.6.2,
+`Godot_v4.6.2-stable_win64.exe`), seeds 1000,1001, H4 pixel profile:
+
+| policy        | mean_episode_length | length_ratio | timeout_rate |
+| ------------- | ------------------- | ------------ | ------------ |
+| stay_only     |               303.0 |        0.168 |         0.00 |
+| seeded_random |               349.5 |        0.194 |         0.00 |
+| untrained_cnn |               303.0 |        0.168 |         0.00 |
+
+`saturation_decision.passed = true`; no negative control saturates the
+0.80 length-ratio or 0.50 timeout-rate threshold.
+
+`python.ndjson` for `godot-eval-stay_only`: 606 step events, 2 with
+`terminated=true terminal_reason="collision"` (one per seed). Episode
+ids progress `ep-000001` → `ep-000003` (env-side counter increments per
+reset; the env's reset call after a terminated step bumps it before the
+next episode's first step lands). Pre-fix the same smoke produced 3600
+step events all `terminated=false`, stuck `ep-000001`, 100% timeout
+rate.
+
+Determinism preserved: `test_live_godot_pixel_same_seed_step_by_step_trajectory_equality`
+and `test_live_godot_reset_and_100_step_smoke` both PASSED post-fix.
+
+Step 2B (profile hardening) is no longer obviously needed on the H4
+pixel profile. The original Step 2A-lite "100% saturation" claim was a
+measurement artifact of this bug; the corrected measurement shows the
+H4 profile already gives a usable non-saturation floor for an H5
+trained-policy comparison.
