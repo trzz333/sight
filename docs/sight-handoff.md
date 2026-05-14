@@ -6,7 +6,7 @@ Canonical handoff document. Updated at the end of every session by whoever execu
 
 **Phase:** H5 (collision-propagation bug fixed; non-saturation gate now PASSES on the H4 pixel profile)
 
-**Last commit:** `1c5c323` chore: refresh handoff hash
+**Last commit:** `fa30dbf` chore: refresh handoff to locked schema
 
 **Current task:** The GDScript collision-propagation bug from `docs/h5-collision-propagation-bug.md` is fixed at `30d220d`. `_h3_perform_step` no longer wipes the H3 terminal flags at start-of-step; the sticky flag set by `_on_player_died` now reaches Python on the next step reply. Post-fix smoke on the H4 pixel profile shows all three negative controls terminate well below the 0.80 length-ratio threshold (stay_only=303.0, seeded_random=349.5, untrained_cnn=303.0; timeout_rate=0.0 for all three).
 
