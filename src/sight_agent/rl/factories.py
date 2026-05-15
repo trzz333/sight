@@ -23,7 +23,7 @@ from typing import Any
 import gymnasium as gym
 from stable_baselines3 import PPO
 from stable_baselines3.common.env_util import make_vec_env
-from stable_baselines3.common.vec_env import VecEnv
+from stable_baselines3.common.vec_env import VecEnv, VecFrameStack
 
 
 # H3 step 7: exact env id routed through the Godot branch. Other ``godot:``
@@ -53,6 +53,7 @@ def make_env(
     pixel_width: int | None = None,
     pixel_height: int | None = None,
     pixel_channels: int | None = None,
+    frame_stack: int | None = None,
 ) -> VecEnv:
     """Build a VecEnv for train or eval.
 
@@ -82,6 +83,14 @@ def make_env(
             Gymnasium ids. ``None`` means "let the env constructor pick
             its default," preserving H3-era behavior when these are
             omitted by the resolver.
+        frame_stack: keyword-only. When set to an integer >= 2 AND
+            ``observation_mode == "pixel"``, the constructed VecEnv is
+            wrapped in SB3's ``VecFrameStack`` with channels-first
+            ordering so the policy sees temporal context. ``None`` and
+            ``1`` are both no-ops (no wrapper applied), preserving the
+            Phase D/E single-frame contract byte-shape. State-mode
+            observations are never frame-stacked by this factory; that
+            is not the H5 plan.
     """
     if mode not in ("train", "eval"):
         raise ValueError(f"mode must be 'train' or 'eval', got {mode!r}")
@@ -89,7 +98,7 @@ def make_env(
         raise ValueError(f"n_envs must be >= 1, got {n_envs}")
 
     if env_id == GODOT_SIGNAL_DODGE_V0:
-        return _make_godot_signal_dodge_v0(
+        vec_env = _make_godot_signal_dodge_v0(
             n_envs=int(n_envs),
             seed=int(seed),
             mode=mode,
@@ -103,16 +112,37 @@ def make_env(
             pixel_height=pixel_height,
             pixel_channels=pixel_channels,
         )
-
-    if _looks_like_gymnasium(env_id):
+    elif _looks_like_gymnasium(env_id):
         if mode == "train":
-            return make_vec_env(env_id, n_envs=int(n_envs), seed=int(seed))
-        return make_vec_env(env_id, n_envs=1, seed=int(seed) + 10_000)
+            vec_env = make_vec_env(env_id, n_envs=int(n_envs), seed=int(seed))
+        else:
+            vec_env = make_vec_env(env_id, n_envs=1, seed=int(seed) + 10_000)
+    else:
+        raise ValueError(
+            f"Unsupported env_id: {env_id!r}. Sight H2 supports Gymnasium env ids only. "
+            f"Future phases will add additional env families via this factory."
+        )
 
-    raise ValueError(
-        f"Unsupported env_id: {env_id!r}. Sight H2 supports Gymnasium env ids only. "
-        f"Future phases will add additional env families via this factory."
-    )
+    # H5 Phase F: optional pixel-mode frame stacking via SB3's
+    # ``VecFrameStack``. Applied uniformly to train and eval VecEnvs so
+    # train, in-training eval, and H5 eval CLI all expose the same stacked
+    # observation contract; without parity, ``model.predict`` on the
+    # trained policy would silently see a mismatched obs shape at eval.
+    # Channel-first ordering matches the Godot pixel contract
+    # ``(C, H, W)`` per ``docs/sight-h4-plan.md`` section 1. Only fires
+    # when explicitly requested and only for pixel observations; state
+    # observations are not stacked here (SB3's VecFrameStack on a 1-d Box
+    # would produce a non-sensical shape and is not the H5 plan).
+    if (
+        observation_mode == "pixel"
+        and frame_stack is not None
+        and int(frame_stack) > 1
+    ):
+        vec_env = VecFrameStack(
+            vec_env, n_stack=int(frame_stack), channels_order="first"
+        )
+
+    return vec_env
 
 
 def smoke_check_env(env_id: str, seed: int) -> tuple[tuple[int, ...], int]:

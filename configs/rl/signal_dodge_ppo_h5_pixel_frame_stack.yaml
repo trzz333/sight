@@ -1,0 +1,70 @@
+run:
+  phase: H5
+  name: signal_dodge_ppo_h5_pixel_frame_stack
+  seed: 0
+  out_dir: runs/rl
+
+env:
+  id: godot:signal-dodge-v0
+  n_envs: 1
+  godot_executable: null
+  project_path: games/signal-dodge
+  max_steps: 1800
+  # Windowed Godot launch is mandatory for pixel mode per
+  # docs/sight-h4-plan.md section 1 + H4 spike.
+  headless: false
+  # H4 pixel contract: uint8 channel-first grayscale (1, 84, 84) frames
+  # at the env boundary. Frame stacking is applied on top of this by
+  # SB3's VecFrameStack inside ``make_env``, so the policy network input
+  # becomes (frame_stack * pixel_channels, pixel_height, pixel_width).
+  observation_mode: pixel
+  pixel_width: 84
+  pixel_height: 84
+  pixel_channels: 1
+  # H5 Phase F: stack the last N grayscale frames at the VecEnv layer
+  # so the CnnPolicy can encode hazard velocity. Single-frame
+  # observations under the H4 pixel contract were tested across Phase
+  # B/C/D (recipe sweep) and Phase E (train-seed sweep) and produced
+  # weak seed-sensitive policies with collision_rate >= 0.9. The
+  # primary hypothesis for Phase F is that single-frame pixels do not
+  # encode velocity well enough for stable avoidance. n_stack=4
+  # matches the SB3/Atari convention. The factory wraps both train
+  # and eval VecEnvs with VecFrameStack(n_stack=4, channels_order=
+  # "first") so the trained policy sees the same stacked tensor at
+  # rollout time that it trained on.
+  frame_stack: 4
+
+algo:
+  framework: stable-baselines3
+  name: PPO
+  policy: CnnPolicy
+  device: cpu
+  # H5 Phase F inherits the Phase D entropy recipe verbatim. The Phase
+  # F hypothesis is that the perception contract (single frame) is
+  # the blocker; the PPO knob recipe is not the lever under test
+  # here. Holding the recipe constant means any change in eval
+  # outcomes is attributable to the observation contract change.
+  hyperparams:
+    n_steps: 256
+    batch_size: 64
+    n_epochs: 4
+    ent_coef: 0.01
+    learning_rate: 0.0003
+    gamma: 0.99
+    gae_lambda: 0.95
+    clip_range: 0.2
+
+train:
+  total_timesteps: 10000
+
+eval:
+  eval_freq: 2048
+  n_eval_episodes: 1
+  deterministic: true
+
+logging:
+  format: ndjson
+
+checkpoint:
+  enabled: true
+  filename: model.zip

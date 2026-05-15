@@ -117,6 +117,14 @@ def _godot_smoke_obs_metadata(cfg: dict[str, Any]) -> tuple[tuple[int, ...], int
     emit a Dict-shape metadata payload; we fall back to the state shape so
     run_start remains writable and a later end-to-end failure is the
     binding signal rather than a smoke probe.
+
+    H5 Phase F: when ``env.frame_stack`` is set to an integer >= 2 in
+    pixel mode, the reported channel dimension is multiplied by the
+    stack depth so run_start reflects the policy-facing observation
+    shape after the factory wraps the VecEnv with VecFrameStack. The
+    trained policy's observation_space inside ``model.zip`` is
+    ``(frame_stack * pixel_channels, pixel_height, pixel_width)``, and
+    the run_start metadata should match.
     """
     env_cfg = cfg.get("env", {}) if isinstance(cfg, dict) else {}
     mode = env_cfg.get("observation_mode", "state") if isinstance(env_cfg, dict) else "state"
@@ -124,6 +132,10 @@ def _godot_smoke_obs_metadata(cfg: dict[str, Any]) -> tuple[tuple[int, ...], int
         ch = int(env_cfg.get("pixel_channels", 1))
         h = int(env_cfg.get("pixel_height", 84))
         w = int(env_cfg.get("pixel_width", 84))
+        fs_raw = env_cfg.get("frame_stack", None)
+        fs = int(fs_raw) if fs_raw is not None else 1
+        if fs > 1:
+            ch = ch * fs
         return (ch, h, w), 3
     return (10,), 3
 

@@ -51,6 +51,12 @@ _OPTIONAL_ENV_PASSTHROUGH_KEYS: tuple[str, ...] = (
     "pixel_width",
     "pixel_height",
     "pixel_channels",
+    # H5 Phase F: optional ``env.frame_stack`` is threaded through to the
+    # factory so ``make_env`` can wrap pixel-mode VecEnvs with SB3's
+    # ``VecFrameStack``. The factory itself owns the wrapping decision; this
+    # resolver only forwards the value when present in the YAML. Omission
+    # keeps Phase D/E single-frame behaviour byte-shape identical.
+    "frame_stack",
 )
 
 

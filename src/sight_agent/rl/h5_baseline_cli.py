@@ -172,15 +172,24 @@ def build_dummy_vec_env_for_cfg(cfg: dict[str, Any]) -> Any:
     Matches the H4 pixel contract: ``Box(0, 255, (C, H, W), uint8)`` and
     ``Discrete(3)``. Reads pixel dimensions from the env config block,
     defaulting to 1x84x84 per ``docs/sight-h4-plan.md`` section 1.
+
+    H5 Phase F: if ``env.frame_stack`` is set to an integer >= 2, the
+    dummy is wrapped with the same ``VecFrameStack`` the factory applies
+    to the live Godot eval env so the untrained_cnn policy's input layer
+    matches the eval-time observation shape. Without this parity the
+    untrained_cnn baseline would see ``(C, H, W)`` at construction and
+    ``(C * n_stack, H, W)`` at predict time and silently misalign.
     """
     import gymnasium as gym
     import numpy as np
-    from stable_baselines3.common.vec_env import DummyVecEnv
+    from stable_baselines3.common.vec_env import DummyVecEnv, VecFrameStack
 
     env_cfg = cfg.get("env", {}) if isinstance(cfg, dict) else {}
     ch = int(env_cfg.get("pixel_channels", 1))
     h = int(env_cfg.get("pixel_height", 84))
     w = int(env_cfg.get("pixel_width", 84))
+    frame_stack_raw = env_cfg.get("frame_stack", None)
+    frame_stack = int(frame_stack_raw) if frame_stack_raw is not None else 1
 
     class _DummyPixelEnv(gym.Env):
         metadata: dict = {"render_modes": []}
@@ -205,7 +214,12 @@ def build_dummy_vec_env_for_cfg(cfg: dict[str, Any]) -> Any:
                 {},
             )
 
-    return DummyVecEnv([_DummyPixelEnv])
+    vec_env: Any = DummyVecEnv([_DummyPixelEnv])
+    if frame_stack > 1:
+        vec_env = VecFrameStack(
+            vec_env, n_stack=frame_stack, channels_order="first"
+        )
+    return vec_env
 
 
 def build_policies_dict(
