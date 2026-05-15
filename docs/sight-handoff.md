@@ -6,7 +6,7 @@ Canonical handoff document. Updated at the end of every session by whoever execu
 
 **Phase:** H5 (Phase E seed sweep complete; NOT closure-grade; seed=0 fixed-point hypothesis falsified; aggregate weak seed-sensitive signal)
 
-**Last commit:** `13e7b08` chore: refresh handoff after phase D entropy slice
+**Last commit:** `8828083` docs(h5): phase E seed sweep evidence slice
 
 **Current task:** Phase E diagnostic train-seed sweep of the Phase D entropy recipe at train seeds 1, 2, 3 (10000 timesteps each), eval seeds 1000-1009 trained_cnn only. Three distinct per-eval-seed trajectory vectors observed across train seeds {0, 1, 2, 3}: A=seed 0 (688.8 reward), B=seed 1 (605.0 reward, byte-equal aggregates to best neg control), C=seed 2 = seed 3 (844.8 reward, byte-equal per-eval-seed lengths and terminal causes despite seed 2 holding entropy and seed 3 collapsing to ~0 entropy by iter 24). Aggregate over seeds {1, 2, 3} pooled: 764.87 reward (+26.4%), 765.80 length (+26.4%), 0.933 collision (-6.7pp), 0.067 timeout. Reward and length bars marginally cleared by ~1pp; collision bar fails by ~13pp. Per the amended diagnostic-not-selection rule, no individual seed is promoted to candidate. Findings in `docs/h5-trained-policy-phase-e-seed-sweep-evidence.md`.
 
