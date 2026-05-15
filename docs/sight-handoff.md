@@ -6,7 +6,7 @@ Canonical handoff document. Updated at the end of every session by whoever execu
 
 **Phase:** H5 (Phase F frame-stack diagnostic sweep complete. Negative result: Phase G NOT triggered. Frame-stack observation contract validates mechanically but does not produce a non-degenerate policy at the Phase D entropy recipe and 10000-timestep budget.)
 
-**Last commit on HEAD:** `42d5533` chore: refresh handoff after phase F frame-stack landing (this handoff and the Phase F evidence doc are uncommitted at write time; will be amended after the commit lands)
+**Last commit on HEAD:** `4ae429f` docs(h5): phase F frame-stack diagnostic sweep evidence
 
 **Substantive code commit:** `5b8fa48` feat(rl): h5 phase f frame-stack observation contract
 
