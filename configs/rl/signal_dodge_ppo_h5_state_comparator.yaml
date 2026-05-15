@@ -1,0 +1,67 @@
+run:
+  phase: H5
+  name: signal_dodge_ppo_h5_state_comparator
+  seed: 0
+  out_dir: runs/rl
+
+env:
+  id: godot:signal-dodge-v0
+  n_envs: 1
+  # Local Godot binary on disk. Left null in the committed config so the
+  # repo stays portable. Resolution at run time prefers this YAML value,
+  # then falls back to the SIGHT_GODOT_EXE env var.
+  godot_executable: null
+  project_path: games/signal-dodge
+  max_steps: 1800
+  # State-mode diagnostic. Windowed launch is retained to match the
+  # Phase E/F observation pipeline and to keep Godot startup behavior
+  # identical to the pixel comparators. The window content is not
+  # consumed by the policy in state mode.
+  headless: false
+  # H5 state-observation comparator. Diagnostic-not-selection: tests
+  # whether PPO can learn Signal Dodge at all when perception is
+  # removed from the loop. If state PPO clears the reward/length
+  # bar and improves collision, the pixel/perception path is the
+  # blocker. If state PPO also collapses to stay-only, reward or
+  # optimization is the blocker and pixel tuning is wasted effort.
+  # See docs/sight-handoff.md and the H5 plan for the lever-selection
+  # rationale; this config is one entry in the lever space, not a
+  # gate-closing experiment.
+  observation_mode: state
+
+algo:
+  framework: stable-baselines3
+  name: PPO
+  # MlpPolicy is mechanically required by obs_shape (10,); the eval CLI
+  # label `trained_cnn` is a documented naming mismatch for this
+  # diagnostic run. The CLI loads model.zip through SB3 regardless of
+  # the policy class string.
+  policy: MlpPolicy
+  device: cpu
+  # Recipe inherits the Phase D/F entropy recipe verbatim. Holding the
+  # recipe constant means any change in eval outcomes is attributable
+  # to the observation contract change.
+  hyperparams:
+    n_steps: 256
+    batch_size: 64
+    n_epochs: 4
+    ent_coef: 0.01
+    learning_rate: 0.0003
+    gamma: 0.99
+    gae_lambda: 0.95
+    clip_range: 0.2
+
+train:
+  total_timesteps: 10000
+
+eval:
+  eval_freq: 2048
+  n_eval_episodes: 1
+  deterministic: true
+
+logging:
+  format: ndjson
+
+checkpoint:
+  enabled: true
+  filename: model.zip
