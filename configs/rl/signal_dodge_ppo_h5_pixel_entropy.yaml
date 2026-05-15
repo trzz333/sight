@@ -1,0 +1,80 @@
+run:
+  phase: H5
+  name: signal_dodge_ppo_h5_pixel_entropy
+  seed: 0
+  out_dir: runs/rl
+
+env:
+  id: godot:signal-dodge-v0
+  n_envs: 1
+  # Local Godot binary on disk. Left null in the committed config so the
+  # repo stays portable. Resolution at run time prefers this YAML value,
+  # then falls back to the SIGHT_GODOT_EXE env var.
+  godot_executable: null
+  # Repo-root-relative project path, resolved against the repo root by
+  # ``sight_agent.rl.godot_config`` before being passed to ``make_env``.
+  project_path: games/signal-dodge
+  # Episode budget. 30 seconds at 60 Hz, matches GodotSignalDodgeEnv default.
+  max_steps: 1800
+  # Windowed Godot launch is mandatory for pixel mode per
+  # docs/sight-h4-plan.md section 1 and the H4 spike: --headless dummy
+  # display server does not emit RenderingServer.frame_post_draw so
+  # viewport capture cannot run under headless. The env constructor
+  # rejects (observation_mode in {pixel,both}) AND headless=True.
+  headless: false
+  # H4 pixel contract per docs/sight-h4-plan.md section 1 + Decision 3:
+  # uint8 channel-first (1, 84, 84) grayscale frames. Channel-first matches
+  # SB3 NatureCNN convolution input expectations.
+  observation_mode: pixel
+  pixel_width: 84
+  pixel_height: 84
+  pixel_channels: 1
+
+algo:
+  framework: stable-baselines3
+  name: PPO
+  # CnnPolicy is required for the H4 pixel observation space; MlpPolicy
+  # would silently flatten the (1, 84, 84) tensor and degrade learning.
+  policy: CnnPolicy
+  device: cpu
+  # H5 Phase D entropy recipe. The H4 smoke-cheap defaults (n_steps=64,
+  # batch_size=32, n_epochs=1, ent_coef defaulting to 0.0) drove
+  # premature deterministic collapse: Phase B (2048 ts) and Phase C
+  # (10000 ts) produced bit-identical eval results despite a 5x
+  # training budget bump. This recipe is a modest learning-grade
+  # baseline, not Atari-scale.
+  # - n_steps=256: less myopic rollouts than 64, but well below SB3's
+  #   2048 default which would balloon wall time on StrongerJr.
+  # - batch_size=64: 4 minibatches per rollout.
+  # - n_epochs=4: more learning passes per rollout than smoke=1, fewer
+  #   than typical=10.
+  # - ent_coef=0.01: direct test for the entropy-collapse hypothesis.
+  hyperparams:
+    n_steps: 256
+    batch_size: 64
+    n_epochs: 4
+    ent_coef: 0.01
+    learning_rate: 0.0003
+    gamma: 0.99
+    gae_lambda: 0.95
+    clip_range: 0.2
+
+train:
+  total_timesteps: 10000
+
+eval:
+  # H5 acceptance evidence comes from the explicit external eval CLI
+  # (sight_agent.rl.h5_baseline_cli), not from in-training eval. The
+  # H4 smoke value eval_freq=64 burns wall time on a constant
+  # in-training eval cadence; raise it to 2048 so it runs at most
+  # once per training trajectory.
+  eval_freq: 2048
+  n_eval_episodes: 1
+  deterministic: true
+
+logging:
+  format: ndjson
+
+checkpoint:
+  enabled: true
+  filename: model.zip
