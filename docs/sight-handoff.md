@@ -6,9 +6,9 @@ Canonical handoff document. Updated at the end of every session by whoever execu
 
 **Phase:** H5 amended. H5 plan section 7 now permits exactly one bounded reward-shaping variant (threat-weighted clearance reward) for H5 continuation. Reward code NOT implemented yet. No training approved against shaped reward until implementation slice lands and tests are green.
 
-**Last commit on HEAD:** TBD (this session's substantive commit lands after this file is written; chore-refresh push will follow).
+**Last commit on HEAD:** `cf427da` docs(h5): reward-amendment proposal and section 7 amendment for threat-weighted clearance reward (chore-refresh follows on push).
 
-**Substantive code/evidence commit:** TBD this session (docs-only: reward-amendment proposal + minimal H5 plan section 7 amendment).
+**Substantive code/evidence commit:** `cf427da` docs(h5): reward-amendment proposal and section 7 amendment for threat-weighted clearance reward.
 
 **Current task:** Docs-only H5 reward-amendment proposal slice complete. Jeff approved the scope amendment (single bounded variant: threat-weighted clearance reward, base `+1/step` preserved, `alpha=0.05`). `docs/h5-reward-amendment-proposal.md` documents rationale (from `docs/h5-behavior-audit-evidence.md`), exact per-step formula, initial constants (`alpha=0.05`, `lookahead_band=270`, `safe_lateral_distance=180`), implementation constraints (no target-env change, no observation-channel change, no future-collision oracle, no wall-specific penalty, no hyperparameter sweep before first shaped-reward diagnostic, separate per-step logging of `base_reward` and `clearance_bonus`, config-gated with default `reward_shaping: none` byte-identical to pre-amendment), confirmation criteria (action=-1 share < 60%, wall-clamp frame share < 50%, GREEN bar plausible, same-seed trajectories diverge), falsification criteria (collision rate >= 0.90, wall-clamp persists, action=-1 share > 80%), and an explicit no-training-before-code-approval statement. `docs/sight-h5-plan.md` section 7 minimally amended in place with an "Amendment 2026-05-16 (Jeff-approved)" sub-bullet pointing at the proposal doc. Default-tier pytest green (391 passed in 20.57s) with the amended docs in place.
 
