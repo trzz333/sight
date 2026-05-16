@@ -174,10 +174,25 @@ be:
   game launchers, no browser scrape pipelines.
 - No bot-detection evasion of any kind. Any anti-bot surface
   encountered during evaluation closes the path immediately.
-- No reward shaping unless separately justified in a charter
-  amendment. The H5 baseline reward is the existing Signal Dodge
-  sparse-survival reward (`+1.0` per non-terminal step, `0.0` at
-  collision terminal).
+- No reward shaping unless separately justified by an amendment
+  to this section. The H5 baseline reward is the existing Signal
+  Dodge sparse-survival reward (`+1.0` per non-terminal step,
+  `0.0` at collision terminal).
+  - **Amendment 2026-05-16 (Jeff-approved):** exactly one
+    bounded reward-shaping variant is permitted for H5
+    continuation, threat-weighted clearance reward, as
+    specified in `docs/h5-reward-amendment-proposal.md`. The
+    base `+1/step` survival reward is preserved; the shaping
+    coefficient starts at `alpha = 0.05` and the per-step
+    bonus is bounded in `[0.0, alpha]`. No target-environment
+    change, no observation-channel change, no commercial-game
+    scope change, no platform automation, and no
+    hyperparameter sweep before the first shaped-reward
+    diagnostic. The negative controls (stay-only, seeded
+    random, untrained `CnnPolicy`) continue to be evaluated
+    under the base sparse-survival reward; the shaped reward
+    applies to the trained `CnnPolicy` only. Any further
+    reward variant requires a new amendment to this section.
 - No GPU dependency for acceptance. CPU PPO must produce the GREEN
   signal. GPU may be used for faster iteration but acceptance runs
   ship reproducibly on the StrongerJr CPU.
