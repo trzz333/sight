@@ -51,6 +51,15 @@ from .godot_transport import (
     GodotRemoteError,
     GodotTransportError,
 )
+from .reward_shaping import (
+    DEFAULT_ALPHA,
+    DEFAULT_LOOKAHEAD_BAND,
+    DEFAULT_SAFE_LATERAL_DISTANCE,
+    REWARD_SHAPING_NONE,
+    REWARD_SHAPING_THREAT_WEIGHTED_CLEARANCE,
+    VALID_REWARD_SHAPINGS,
+    compute_threat_weighted_clearance,
+)
 
 
 __all__ = ["GodotSignalDodgeEnv", "DEFAULT_MAX_STEPS"]
@@ -164,6 +173,10 @@ class GodotSignalDodgeEnv(gym.Env):
         pixel_width: int = 84,
         pixel_height: int = 84,
         pixel_channels: int = 1,
+        reward_shaping: str = REWARD_SHAPING_NONE,
+        reward_shaping_alpha: float = DEFAULT_ALPHA,
+        reward_shaping_lookahead_band: float = DEFAULT_LOOKAHEAD_BAND,
+        reward_shaping_safe_lateral_distance: float = DEFAULT_SAFE_LATERAL_DISTANCE,
         transport_factory: Callable[..., GodotH3Transport] | None = None,
         process_factory: Callable[..., subprocess.Popen] | None = None,
     ) -> None:
@@ -187,6 +200,26 @@ class GodotSignalDodgeEnv(gym.Env):
         ):
             if not isinstance(_val, int) or isinstance(_val, bool) or _val <= 0:
                 raise ValueError(f"{_name} must be positive int, got {_val!r}")
+        if reward_shaping not in VALID_REWARD_SHAPINGS:
+            raise ValueError(
+                f"reward_shaping must be one of {sorted(VALID_REWARD_SHAPINGS)}, "
+                f"got {reward_shaping!r}"
+            )
+        if reward_shaping_alpha < 0.0:
+            raise ValueError(
+                f"reward_shaping_alpha must be >= 0.0, got "
+                f"{reward_shaping_alpha!r}"
+            )
+        if reward_shaping_lookahead_band <= 0.0:
+            raise ValueError(
+                f"reward_shaping_lookahead_band must be > 0.0, got "
+                f"{reward_shaping_lookahead_band!r}"
+            )
+        if reward_shaping_safe_lateral_distance <= 0.0:
+            raise ValueError(
+                f"reward_shaping_safe_lateral_distance must be > 0.0, got "
+                f"{reward_shaping_safe_lateral_distance!r}"
+            )
         # Headless rejection per docs/sight-h4-plan.md section 1: caller
         # intent must be honored or rejected, not silently transformed.
         # The H4 spike (docs/sight-h4-spike.md) proved Godot 4.6.2's
@@ -215,6 +248,12 @@ class GodotSignalDodgeEnv(gym.Env):
         self._pixel_width = int(pixel_width)
         self._pixel_height = int(pixel_height)
         self._pixel_channels = int(pixel_channels)
+        self._reward_shaping = reward_shaping
+        self._reward_shaping_alpha = float(reward_shaping_alpha)
+        self._reward_shaping_lookahead_band = float(reward_shaping_lookahead_band)
+        self._reward_shaping_safe_lateral_distance = float(
+            reward_shaping_safe_lateral_distance
+        )
         self._transport_factory = transport_factory or _default_transport_factory
         self._process_factory = process_factory or _default_process_factory
 
@@ -428,10 +467,53 @@ class GodotSignalDodgeEnv(gym.Env):
             raise
 
         obs = self._obs_to_np(resp["obs"])
-        reward = float(resp["reward"])
+        base_reward = float(resp["reward"])
         terminated = bool(resp["terminated"])
         truncated = bool(resp["truncated"])
         terminal_reason = str(resp.get("terminal_reason", protocol.TERMINAL_REASON_NONE))
+
+        # H5 amendment (docs/h5-reward-amendment-proposal.md). When
+        # ``reward_shaping`` is ``none`` the env layer returns the
+        # Godot-supplied base reward unchanged and emits the
+        # pre-amendment ``step`` log schema byte-identically. When
+        # shaping is enabled, the bonus is computed from the per-step
+        # ``reward_state`` Godot adds to ``info``, the bonus is added
+        # to ``base_reward`` only on non-terminal steps (collision
+        # remains 0.0; truncation preserves Godot's final +1.0 plus the
+        # final-step bonus), and the shaped components are emitted as
+        # distinct fields in the ``step`` log event for the evidence
+        # pass.
+        if self._reward_shaping == REWARD_SHAPING_THREAT_WEIGHTED_CLEARANCE:
+            reward_state = None
+            wire_info = resp.get("info")
+            if isinstance(wire_info, dict):
+                rs = wire_info.get("reward_state")
+                if isinstance(rs, dict):
+                    reward_state = rs
+            if terminated:
+                clearance_bonus = 0.0
+                threat_weight_sum = 0.0
+                active_hazard_count = 0
+            else:
+                (
+                    clearance_bonus,
+                    threat_weight_sum,
+                    active_hazard_count,
+                ) = compute_threat_weighted_clearance(
+                    reward_state,
+                    alpha=self._reward_shaping_alpha,
+                    lookahead_band=self._reward_shaping_lookahead_band,
+                    safe_lateral_distance=(
+                        self._reward_shaping_safe_lateral_distance
+                    ),
+                )
+            reward = base_reward + clearance_bonus
+        else:
+            clearance_bonus = 0.0
+            threat_weight_sum = 0.0
+            active_hazard_count = 0
+            reward = base_reward
+
         info = self._build_info(
             resp,
             episode_seed=None,
@@ -440,15 +522,39 @@ class GodotSignalDodgeEnv(gym.Env):
         )
         if terminated or truncated:
             self._episode_done = True
-        self._log_event(
-            "step",
-            episode_id=info["episode_id"],
-            frame=info["frame"],
-            reward=reward,
-            terminated=terminated,
-            truncated=truncated,
-            terminal_reason=terminal_reason,
-        )
+        if self._reward_shaping == REWARD_SHAPING_THREAT_WEIGHTED_CLEARANCE:
+            # Shaped-mode log schema. Includes the unshaped ``reward``
+            # (the value returned to the Gym caller, base + bonus) so
+            # downstream tooling reading ``step`` events sees the same
+            # field name as the default path, plus the explicit
+            # decomposition fields. ``base_reward`` is the Godot wire
+            # value before any shaping.
+            self._log_event(
+                "step",
+                episode_id=info["episode_id"],
+                frame=info["frame"],
+                reward=reward,
+                base_reward=base_reward,
+                clearance_bonus=clearance_bonus,
+                threat_weight_sum=threat_weight_sum,
+                active_hazard_count_above_player=active_hazard_count,
+                terminated=terminated,
+                truncated=truncated,
+                terminal_reason=terminal_reason,
+            )
+        else:
+            # Pre-amendment log schema, byte-identical to Phase A-E.
+            # No shaped-mode fields emitted; the regression test asserts
+            # this directly.
+            self._log_event(
+                "step",
+                episode_id=info["episode_id"],
+                frame=info["frame"],
+                reward=reward,
+                terminated=terminated,
+                truncated=truncated,
+                terminal_reason=terminal_reason,
+            )
         return obs, reward, terminated, truncated, info
 
     def close(self) -> None:

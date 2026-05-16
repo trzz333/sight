@@ -84,16 +84,26 @@ if W > 0:
 else:
     clearance_bonus = 0.0
 
-non_terminal_step_reward = 1.0 + clearance_bonus
-collision_terminal_reward = 0.0
-truncation_terminal_reward = 0.0
+# Wire base reward is preserved exactly. The Python env wrapper reads
+# base_reward = float(resp["reward"]) from the Godot step response and
+# only modulates it when shaping is enabled. Godot's existing rule
+# (games/signal-dodge/scripts/main.gd) is "reward = 0.0 if terminated
+# else 1.0", so collision yields 0.0 and timeout/truncation yields 1.0;
+# neither value is hard-coded on the Python side.
+
+if shaping enabled and not terminated:
+    reward = base_reward + clearance_bonus
+else:
+    reward = base_reward
 ```
 
 Properties of the formulation:
 
 - The shaping term is bounded in `[0.0, alpha]`. With `alpha = 0.05`,
-  the per-step reward lies in `[1.0, 1.05]` non-terminal and stays at
-  `0.0` on collision. Over a full 1800-step episode the maximum
+  the per-step reward lies in `[1.0, 1.05]` for non-terminal steps,
+  stays at `1.0 + clearance_bonus` on the truncation step (matching
+  Godot's `+1.0` final non-collision step), and stays at `0.0` on the
+  collision terminal step. Over a full 1800-step episode the maximum
   cumulative shaping contribution is `90.0`, against a base of `1800.0`.
   Survival therefore remains the dominant gradient signal.
 - The shaping is `0.0` when no hazards are above the player (between
@@ -165,19 +175,32 @@ Binding for the H5 continuation slice that implements this reward:
    per `configs/rl/signal_dodge_ppo_h5_pixel_entropy.yaml`) only,
    so the reward change is the single independent variable against
    Phase E.
-8. **Reward components must be logged separately.** Each step must
-   record `base_reward` (the `+1.0` or `0.0`) and `clearance_bonus`
-   (the shaping term) as distinct fields in `python.ndjson`, so the
-   evidence pass can separate base survival from shaping
-   contribution without re-deriving.
+8. **Reward components must be logged separately when shaping is
+   enabled.** When `reward_shaping` is set to
+   `threat_weighted_clearance`, each step records `base_reward`
+   (the value Godot returned, `+1.0` or `0.0`), `clearance_bonus`
+   (the shaping term in `[0, alpha]`), the final `reward`,
+   `active_hazard_count_above_player`, and `threat_weight_sum`
+   as distinct fields in `python.ndjson`, so the evidence pass can
+   separate base survival from shaping contribution without
+   re-deriving. When `reward_shaping` is `none`, these shaped-mode
+   fields are not emitted; the default log shape is byte-identical
+   to the pre-amendment behavior so the regression test in item 12
+   can prove byte-equality against a freshly recomputed default-path
+   reference rather than a stored Phase E artifact.
 
 9. **Reward computation lives Python-side.** The shaping bonus is
-   computed in the env wrapper from the `state` dict the Godot side
-   already exposes (player position, hazard list with id/x/y). The
-   GDScript reward source remains the existing sparse-survival
-   signal; the Python env layer adds the bonus before returning
-   `(obs, reward, terminated, truncated, info)`. This keeps Godot
-   side unchanged and makes the shaping ablate-able by config.
+   computed in the env wrapper from a per-step `reward_state` dict
+   that the Godot side adds to step `info`: player position
+   (`player_x`, `player_y`) and the list of hazards above the player
+   (`{id, x, y}`). The GDScript reward source remains the existing
+   sparse-survival signal; the Python env layer adds the bonus
+   before returning `(obs, reward, terminated, truncated, info)`.
+   This keeps the Godot reward path and physics unchanged and makes
+   the shaping ablate-able by config. Adding `reward_state` under
+   step `info` is a forward-compatible wire extension per
+   `src/sight_agent/protocol.py`: `info` is required, but unknown
+   sub-keys are tolerated by existing consumers.
 10. **Config-gated.** A new YAML key `reward_shaping` selects the
     shape; the default value remains `none` (preserving the H4 and
     Phase-A-through-E reward). Existing configs and existing runs
@@ -188,6 +211,22 @@ Binding for the H5 continuation slice that implements this reward:
 11. **No charter amendment.** This is an H5 plan amendment only.
     Charter mission, scope, non-goals, and ethics armor are
     unchanged.
+12. **GREEN math uses base reward.** H5 plan section 6 GREEN bar
+    comparisons (trained vs negative controls, 25% mean-reward
+    threshold) use the Godot base survival reward, episode length,
+    and collision rate. The shaped total (`base + clearance`) is
+    reported separately as a training-diagnostic quantity, not as
+    a free comparator advantage; including it in the GREEN math
+    against base-only controls would overstate learning by the
+    shaping mass alone.
+13. **Regression test for default path.** A deterministic
+    fake-transport/golden unit test must prove that
+    `reward_shaping: none` returns the exact Godot-supplied reward,
+    preserves termination and truncation handling, and produces a
+    `python.ndjson` event schema byte-identical to the pre-amendment
+    default path. The test does not depend on a committed Phase E
+    artifact; `runs/` is gitignored and CI cannot rely on a local
+    artifact.
 
 ## 6. Confirmation criteria
 
@@ -210,11 +249,12 @@ fixed, only `reward_shaping` changed from `none` to
    shaped-reward artifact:
    - trained policy beats the best negative control by at least
      25% mean reward OR 25% mean episode length on the configured
-     profile (where "reward" for the trained policy is interpreted
-     as the sum of base survival reward plus clearance bonus, and
-     for negative controls as base survival reward alone; the
-     evidence summary must report both totals and the base-only
-     comparator).
+     profile. GREEN math uses the **Godot base survival reward**
+     for both the trained policy and the negative controls
+     (apples-to-apples). The shaped total (base + clearance) is
+     reported alongside as a training-diagnostic; including it in
+     the GREEN bar against base-only controls would overstate the
+     advantage by the shaping mass alone.
    - trained policy reduces collision rate by at least 20 percentage
      points vs the best negative control.
 3. Same-seed behavior changes for the expected reason:
@@ -295,28 +335,37 @@ tests are green.
 
 ## 10. Open items routed to GPT for design review
 
-These are not blockers to committing this proposal; they are the
-specific items GPT should weigh before the implementation slice is
-authorized.
+These were the items GPT weighed before authorizing the implementation
+slice. Resolutions are recorded inline so the implementation contract
+is traceable from this document alone.
 
-- Whether the negative controls should also be re-evaluated under
-  shaped reward for an apples-to-apples reward-axis comparison, in
-  addition to the base-reward comparison above. The argument for:
-  cleaner GREEN-bar math. The argument against: changing the
-  negative controls retroactively re-bases every prior eval.
-
-- Whether the initial `lookahead_band = 270` and
-  `safe_lateral_distance = 180` should be smoke-tested with a single
-  short un-trained run (random or stay-only) before training, to
-  confirm the per-step bonus is not pathological at the chosen
-  constants. A pre-training smoke is cheap and falls inside the
-  no-training-before-code-approval rule once the code lands.
-- Whether the implementation slice should also emit a per-step
-  `active_hazard_count_above_player` field to make future audits of
-  the shaping behavior easier without a re-derivation pass.
-- Whether to add a regression test that fixes `reward_shaping: none`
-  byte-equality of total reward against a stored Phase E artifact,
-  to guarantee the default code path is byte-identical to the
-  pre-amendment behavior.
+- **Negative controls re-evaluated under shaped reward.** Resolved:
+  **no**. Keeping `stay_only`, `seeded_random`, and `untrained_cnn`
+  under base sparse-survival reward preserves comparability across
+  phases. Re-running controls under shaped reward is permitted as a
+  later analysis pass but is not a blocker for the first shaped
+  diagnostic. The H5 plan baseline suite (section 3) is unchanged.
+- **Pre-training smoke at the initial constants.** Resolved: **yes**,
+  blocking before the first shaped training run. After the
+  implementation slice commits and tests pass, run a no-training
+  smoke with `lookahead_band = 270`, `safe_lateral_distance = 180`,
+  `alpha = 0.05` using a stay-only or seeded-random / untrained
+  policy. The smoke must verify `clearance_bonus` stays in
+  `[0.0, 0.05]`, is not always zero, is not saturated near `0.05`
+  almost every frame, appears during active-hazard windows, and that
+  `reward_shaping: none` still behaves identically. The smoke uses
+  no training and therefore falls inside the no-training-before-
+  code-approval rule.
+- **`active_hazard_count_above_player` log field.** Resolved:
+  **yes**, plus `threat_weight_sum`. Both are cheap audit fields
+  that remove future re-derivation; both are emitted only when
+  `reward_shaping` is `threat_weighted_clearance`. See implementation
+  constraint 8.
+- **Regression test for `reward_shaping: none` byte-equality.**
+  Resolved: **yes, but not against a stored Phase E artifact.**
+  `runs/` is gitignored and CI cannot depend on a local artifact.
+  Use a deterministic fake-transport/golden unit test that proves
+  default-path reward, termination, truncation, and `python.ndjson`
+  schema are unchanged. See implementation constraint 13.
 
 End of proposal.

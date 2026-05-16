@@ -57,6 +57,15 @@ _OPTIONAL_ENV_PASSTHROUGH_KEYS: tuple[str, ...] = (
     # resolver only forwards the value when present in the YAML. Omission
     # keeps Phase D/E single-frame behaviour byte-shape identical.
     "frame_stack",
+    # H5 reward amendment (docs/h5-reward-amendment-proposal.md). Default
+    # ``reward_shaping: none`` is byte-identical to the pre-amendment
+    # reward path; when present in the YAML, ``reward_shaping`` plus the
+    # three tunables are forwarded to ``GodotSignalDodgeEnv``. Omission
+    # keeps Phase A-E reward behaviour byte-shape identical.
+    "reward_shaping",
+    "reward_shaping_alpha",
+    "reward_shaping_lookahead_band",
+    "reward_shaping_safe_lateral_distance",
 )
 
 

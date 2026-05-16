@@ -481,6 +481,16 @@ func _h3_perform_step(req: Dictionary, delta: float) -> void:
 	var info := {
 		"frame": _frame_counter,
 		"action": mapped,
+		# H5 reward amendment (docs/h5-reward-amendment-proposal.md).
+		# Per-step ``reward_state`` is consumed by the Python env wrapper
+		# to compute the threat-weighted clearance bonus when shaping is
+		# enabled. Emitted unconditionally so the same wire payload
+		# supports later analysis passes that re-run reward shaping over
+		# stored trajectories without re-instrumenting Godot. Adding a
+		# nested key under ``info`` is a forward-compatible extension
+		# per ``src/sight_agent/protocol.py``: ``info`` is required,
+		# unknown sub-keys are tolerated by existing consumers.
+		"reward_state": _h3_build_reward_state(),
 	}
 	if terminated and not _h3_collision_info.is_empty():
 		info["collision"] = _h3_collision_info.duplicate()
@@ -579,6 +589,39 @@ func _h3_sort_hazards_by_threat() -> Array:
 		return sid_a < sid_b
 	)
 	return candidates
+
+
+func _h3_build_reward_state() -> Dictionary:
+	# H5 reward amendment (docs/h5-reward-amendment-proposal.md).
+	#
+	# Per-step state Python needs to compute the threat-weighted clearance
+	# bonus. The filter mirrors ``_h3_sort_hazards_by_threat``: hazards at
+	# or above the player count; hazards strictly below have already
+	# passed and cannot collide with the player. The id is the
+	# deterministic ``h3_spawn_id`` stamped at ``_spawn_hazard``, so the
+	# Python side can join cross-step diagnostics by hazard identity
+	# without depending on Godot scene-tree references.
+	#
+	# This builder does not sort; the reward formula is order-invariant
+	# (sum of weighted clearances divided by sum of weights). Sorting
+	# would be a wasted physics-tick allocation.
+	var px: float = _player.position.x
+	var py: float = _player.position.y
+	var hazards_above: Array = []
+	for h in _hazards:
+		if not is_instance_valid(h):
+			continue
+		if h.position.y <= py:
+			hazards_above.append({
+				"id": int(h.get_meta("h3_spawn_id", 0)),
+				"x": h.position.x,
+				"y": h.position.y,
+			})
+	return {
+		"player_x": px,
+		"player_y": py,
+		"hazards_above": hazards_above,
+	}
 
 
 # --- H4 step 3 windowed Godot viewport pixel source --------------------------

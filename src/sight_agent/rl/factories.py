@@ -54,6 +54,10 @@ def make_env(
     pixel_height: int | None = None,
     pixel_channels: int | None = None,
     frame_stack: int | None = None,
+    reward_shaping: str | None = None,
+    reward_shaping_alpha: float | None = None,
+    reward_shaping_lookahead_band: float | None = None,
+    reward_shaping_safe_lateral_distance: float | None = None,
 ) -> VecEnv:
     """Build a VecEnv for train or eval.
 
@@ -111,6 +115,12 @@ def make_env(
             pixel_width=pixel_width,
             pixel_height=pixel_height,
             pixel_channels=pixel_channels,
+            reward_shaping=reward_shaping,
+            reward_shaping_alpha=reward_shaping_alpha,
+            reward_shaping_lookahead_band=reward_shaping_lookahead_band,
+            reward_shaping_safe_lateral_distance=(
+                reward_shaping_safe_lateral_distance
+            ),
         )
     elif _looks_like_gymnasium(env_id):
         if mode == "train":
@@ -229,6 +239,10 @@ def _make_godot_signal_dodge_v0(
     pixel_width: int | None = None,
     pixel_height: int | None = None,
     pixel_channels: int | None = None,
+    reward_shaping: str | None = None,
+    reward_shaping_alpha: float | None = None,
+    reward_shaping_lookahead_band: float | None = None,
+    reward_shaping_safe_lateral_distance: float | None = None,
 ) -> VecEnv:
     """H3 step 7 + H4 step 6: build a single-env ``DummyVecEnv`` wrapping ``GodotSignalDodgeEnv``.
 
@@ -306,6 +320,13 @@ def _make_godot_signal_dodge_v0(
         ("pixel_width", pixel_width),
         ("pixel_height", pixel_height),
         ("pixel_channels", pixel_channels),
+        ("reward_shaping", reward_shaping),
+        ("reward_shaping_alpha", reward_shaping_alpha),
+        ("reward_shaping_lookahead_band", reward_shaping_lookahead_band),
+        (
+            "reward_shaping_safe_lateral_distance",
+            reward_shaping_safe_lateral_distance,
+        ),
     ):
         if _val is not None:
             extra_env_kwargs[_name] = _val
