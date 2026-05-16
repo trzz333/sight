@@ -6,9 +6,9 @@ Canonical handoff document. Updated at the end of every session by whoever execu
 
 **Phase:** H5 state-comparator slice complete; Phase G NOT triggered. Diagnostic-not-selection negative result.
 
-**Last commit on HEAD:** to be refreshed in chore commit (see "Next action").
+**Last commit on HEAD:** `f67966b` docs(h5): state-observation comparator diagnostic evidence (chore-refresh follows on push)
 
-**Substantive code/evidence commit:** to be set in this session's commit closing the slice (`docs(h5)`-prefixed evidence commit).
+**Substantive code/evidence commit:** `f67966b` docs(h5): state-observation comparator diagnostic evidence
 
 **Current task:** H5 state-observation comparator slice closed. GPT-approved diagnostic-not-selection move tested whether PPO can learn Signal Dodge when perception is removed from the loop. Three 10k seeds trained against `configs/rl/signal_dodge_ppo_h5_state_comparator.yaml` (`MlpPolicy`, `obs_shape (10,)`, recipe inherited verbatim from Phase D/F), all `status=ok`, entropy stable at -1.07 to -1.10 across all 40 iterations of every seed (sharp contrast to Phase F seed 1 collapse at iteration 33). Full-mode eval over seeds 1000-1009 pooled across seeds 1, 2, 3 to reward 646.90, length 647.83, collision 0.933, timeout 0.067. State pooled FAILS every GPT success-bar criterion: reward 646.90 < 756.25; length 647.83 < 757.50; collision 0.933 > 0.80. Pooled is below every pixel comparator on reward/length (Phase E 764.87/765.80, Phase F 712.87/713.80) and tied with all pixel comparators on collision. Policy is non-degenerate (variance 183-1800, two full-survival timeouts) but does not avoid hazards better than stay_only. Evidence: `docs/h5-state-comparator-evidence.md`.
 
