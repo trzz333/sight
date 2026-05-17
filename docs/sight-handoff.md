@@ -6,7 +6,7 @@ Canonical handoff document. Updated at the end of every session by whoever execu
 
 **Phase:** Demo-0 visible-AI artifact complete. K0 closed, K1 architecture probe still held pending Jeff's explicit go signal. Phase nomenclature unchanged (H5 amended); Demo-0 is a parallel visibility slice that interrupted the K-series ladder per GPT's correction (diagnostics do not substitute for a watchable artifact).
 
-**Last commit:** _to be backfilled by chore commit_
+**Last commit:** `726b607` Demo-0: visible AI playing Signal Dodge end-to-end artifact.
 
 **Current task:** Demo-0 visible-AI artifact landed. New tool `tools\demo0_visible_play.py` loads a trained CnnPolicy PPO model, launches Signal Dodge in windowed pixel mode via `GodotSignalDodgeEnv(headless=False)`, steps with `model.predict(obs, deterministic=True)`, and writes upscaled frame PNGs, an MP4 (mp4v codec, OpenCV `VideoWriter`), per-step NDJSON, and a manifest. Demo-0 was run against Phase E seed=2 entropy-recipe checkpoint (`runs\rl\signal_dodge_ppo_h5_pixel_entropy\h5_train_phase_e_seed2_entropy_10k\model.zip`), eval seed=1008, 1 episode, fps=20, upscale=4. Result: 1800 steps, total_reward=1800.0, terminated=false, truncated=true, terminal_reason="timeout", wall=50.0 s. Behavior: 100% `left` across all 1800 steps. Survival is coincidence of seed 1008 hazard placement, not avoidance competence. This confirms the K0-10k wedge / constant-action diagnosis at deployment time. Evidence at `docs\demo0-visible-ai-playing-evidence.md` with artifact sha256s. Artifact sha256: mp4 `3a61c098…`, steps.ndjson `33b7a432…`, manifest `0e341cca…` (full hashes in evidence doc; all artifacts gitignored under `runs/demo0/`).
 
