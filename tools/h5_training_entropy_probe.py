@@ -95,10 +95,17 @@ def snapshot_action_net(policy: Any) -> dict[str, Any]:
     }
 
 
-def snapshot_rollout_policy_state(
-    policy: Any, rollout_obs_tensor: th.Tensor
+def snapshot_policy_state(
+    policy: Any, obs_tensor: th.Tensor
 ) -> dict[str, Any]:
-    """Compute pre/post-update entropy and raw-logit margin on rollout obs.
+    """Pre/post-update policy diagnostics on an arbitrary obs tensor.
+
+    Generalization of the original ``snapshot_rollout_policy_state``. Takes
+    any obs tensor (rollout obs OR Phase K K3+ fixed observation-conditioning
+    panel) and returns entropy, raw-logit margin, mean probs, argmax
+    fractions, plus the K3 observation-conditioning-contract fields:
+    ``det_argmax_counts``, ``num_det_actions``, ``mean_logits``,
+    ``logit_std``, and ``prob_ranges``.
 
     Uses the same actor-path extraction as tools/h5_activation_compare.py
     (extract_features -> mlp_extractor -> action_net -> softmax) so the
@@ -106,12 +113,15 @@ def snapshot_rollout_policy_state(
     torch.no_grad() and does not affect the optimizer state.
     """
     with th.no_grad():
-        features = policy.extract_features(rollout_obs_tensor)
+        features = policy.extract_features(obs_tensor)
         latent_pi, _latent_vf = policy.mlp_extractor(features)
         raw_logits = policy.action_net(latent_pi)
         probs = th.softmax(raw_logits, dim=-1)
-        # Per-action probability fractions across the rollout (mean of probs).
+        # Per-action probability fractions across the obs batch (mean of probs).
         mean_probs = probs.mean(dim=0).detach().cpu().numpy().astype(np.float64)
+        # Raw per-obs probability and logit matrices for range/std stats.
+        probs_np = probs.detach().cpu().numpy().astype(np.float64)
+        logits_np = raw_logits.detach().cpu().numpy().astype(np.float64)
         # Top-1 minus top-2 raw logit margin per step.
         top2 = th.topk(raw_logits, k=2, dim=-1).values
         margin = (top2[:, 0] - top2[:, 1]).detach().cpu().numpy().astype(np.float64)
@@ -122,7 +132,7 @@ def snapshot_rollout_policy_state(
         # Per-step argmax over raw logits.
         argmax_per_step = raw_logits.argmax(dim=-1).detach().cpu().numpy().astype(np.int64)
     n = int(margin.size)
-    # Argmax fractions across the rollout obs.
+    # Argmax counts/fractions across the obs batch.
     argmax_counts = {i: int(np.sum(argmax_per_step == i)) for i in range(3)}
     argmax_frac = {ACTION_NAMES[i]: float(argmax_counts[i] / n) if n else 0.0 for i in range(3)}
     return {
@@ -137,7 +147,198 @@ def snapshot_rollout_policy_state(
         "argmax_fractions": argmax_frac,
         "top_argmax_action": ACTION_NAMES[int(max(argmax_counts.items(), key=lambda kv: kv[1])[0])],
         "top_argmax_fraction": float(max(argmax_frac.values())) if argmax_frac else 0.0,
+        "det_argmax_counts": {ACTION_NAMES[i]: int(argmax_counts[i]) for i in range(3)},
+        "num_det_actions": int(sum(1 for c in argmax_counts.values() if c > 0)),
+        "mean_logits": (
+            {ACTION_NAMES[i]: float(np.mean(logits_np[:, i])) for i in range(3)}
+            if n else {ACTION_NAMES[i]: 0.0 for i in range(3)}
+        ),
+        "logit_std": (
+            {ACTION_NAMES[i]: float(np.std(logits_np[:, i])) for i in range(3)}
+            if n else {ACTION_NAMES[i]: 0.0 for i in range(3)}
+        ),
+        "prob_ranges": (
+            {
+                ACTION_NAMES[i]: {
+                    "min": float(np.min(probs_np[:, i])),
+                    "max": float(np.max(probs_np[:, i])),
+                }
+                for i in range(3)
+            }
+            if n else {
+                ACTION_NAMES[i]: {"min": 0.0, "max": 0.0} for i in range(3)
+            }
+        ),
     }
+
+
+# Backward-compat alias preserved for any external importer of the K0/K1/K2
+# era helper name. All internal callsites are migrated to snapshot_policy_state.
+snapshot_rollout_policy_state = snapshot_policy_state
+
+
+def _parse_int_list(s: str | None) -> list[int]:
+    """Parse comma-separated integers; empty/None -> []."""
+    if not s:
+        return []
+    return [int(x.strip()) for x in s.split(",") if x.strip()]
+
+
+def build_fixed_observation_panel(
+    cfg: dict[str, Any],
+    godot_extra: dict[str, Any],
+    train_seed: int,
+    out_dir: Path,
+    label: str,
+) -> tuple[np.ndarray, dict[str, Any]]:
+    """Build a fixed, policy-independent observation-conditioning panel.
+
+    Real Godot rollouts under fixed reset seeds and scripted action prefixes.
+    State injection into the renderer is not available, so the panel proxies
+    "deliberately varied player/hazard configurations" by diversifying the
+    trajectory that produces each captured obs.
+
+    Used in Phase K K3+ to evaluate, per PPO update, whether the in-training
+    policy's deterministic argmax varies as a function of input. The panel
+    is constructed once before training begins, observations are stacked into
+    a tensor, the panel Godot subprocess is closed, and only the captured
+    obs tensor is retained for per-update snapshots. Only one Godot
+    subprocess is alive at any time (panel close happens before train env
+    open).
+
+    Mode note: ``mode="train"`` is used for the panel env. GPT's K3 contract
+    specified ``mode="eval"``; the factory's eval branch adds +10000 to the
+    seed at construction, which is immediately overridden by
+    ``panel_vec.seed(panel_seed)``. Functionally equivalent, but
+    ``mode="train"`` keeps run-dir naming clean and avoids muddling seed
+    accounting.
+
+    Args:
+        cfg: parsed YAML config dict (must contain ``env.id``).
+        godot_extra: dict of resolved Godot kwargs (executable, project_path,
+            pixel dims, etc.) from ``godot_config.resolve_godot_kwargs``.
+        train_seed: int. The factory seed is set once at construction and
+            then overridden per panel item via ``panel_vec.seed()``.
+        out_dir: output base directory; the panel env's run_dir is
+            ``out_dir/godot_<label>_fixed_panel``.
+        label: run label, used to namespace the panel run_dir.
+
+    Returns:
+        Tuple of ``(obs_stack, metadata)`` where ``obs_stack`` is a numpy
+        array of shape ``(N, *obs_shape)`` with ``N >= 12`` on success, and
+        ``metadata`` describes which ``(seed, prefix_name)`` pairs survived.
+
+    Raises:
+        RuntimeError if the surviving panel < 12 items. The panel env is
+        always closed in a finally block.
+    """
+    env_id = cfg["env"]["id"]
+
+    panel_seeds = [730001, 730002, 730003, 730004]
+    panel_prefixes: list[tuple[str, list[int]]] = [
+        ("initial", []),
+        ("stay_15", [1] * 15),
+        ("stay_30", [1] * 30),
+        ("left_15", [0] * 15),
+        ("right_15", [2] * 15),
+        ("left_15_right_15", [0] * 15 + [2] * 15),
+        ("right_15_left_15", [2] * 15 + [0] * 15),
+        ("zigzag_30", [0, 2] * 15),
+    ]
+
+    panel_run_dir = out_dir / f"godot_{label}_fixed_panel"
+    panel_run_dir.mkdir(parents=True, exist_ok=True)
+
+    if godot_extra:
+        panel_vec = make_env(
+            env_id,
+            n_envs=1,
+            seed=int(train_seed),
+            mode="train",
+            run_dir=str(panel_run_dir),
+            **godot_extra,
+        )
+    else:
+        panel_vec = make_env(
+            env_id,
+            n_envs=1,
+            seed=int(train_seed),
+            mode="train",
+        )
+
+    captured_obs: list[np.ndarray] = []
+    captured_meta: list[dict[str, Any]] = []
+    skipped: list[dict[str, Any]] = []
+    try:
+        for seed_val in panel_seeds:
+            for prefix_name, prefix_actions in panel_prefixes:
+                # Re-seed the VecEnv so the next reset uses this exact seed.
+                # DummyVecEnv.seed() stores the seed and the underlying env's
+                # reset(seed=...) is honored by GodotSignalDodgeEnv (see
+                # src/sight_agent/rl/godot_env.py reset()).
+                try:
+                    panel_vec.seed(int(seed_val))
+                except Exception:
+                    # Some VecEnv subclasses may raise on .seed(); the
+                    # subsequent reset is still seeded via env constructor.
+                    pass
+                obs = panel_vec.reset()
+                terminated_in_prefix = False
+                for action in prefix_actions:
+                    obs, _rewards, dones, _infos = panel_vec.step(
+                        np.array([int(action)], dtype=np.int64)
+                    )
+                    if bool(dones[0]):
+                        # DummyVecEnv auto-resets on done; the obs returned
+                        # is the post-reset obs, NOT the terminal frame.
+                        # Skip this panel item so we never capture an
+                        # auto-reset obs as a "scripted prefix" output.
+                        terminated_in_prefix = True
+                        break
+                if terminated_in_prefix:
+                    skipped.append({
+                        "panel_seed": int(seed_val),
+                        "prefix_name": prefix_name,
+                        "reason": "episode_terminated_during_prefix",
+                    })
+                    continue
+                # obs is (1, *obs_shape) from DummyVecEnv. Capture the single
+                # env's observation as a contiguous copy so subsequent steps
+                # do not mutate the captured tensor.
+                captured_obs.append(np.asarray(obs[0]).copy())
+                captured_meta.append({
+                    "panel_seed": int(seed_val),
+                    "prefix_name": prefix_name,
+                    "prefix_length": int(len(prefix_actions)),
+                })
+    finally:
+        try:
+            panel_vec.close()
+        except Exception:
+            pass
+
+    if len(captured_obs) < 12:
+        raise RuntimeError(
+            f"fixed observation panel only captured {len(captured_obs)} "
+            f"observations (need >= 12); skipped={len(skipped)}. "
+            f"Skipped details: {skipped[:8]}"
+        )
+
+    obs_stack = np.stack(captured_obs, axis=0)
+    metadata = {
+        "panel_seeds": [int(s) for s in panel_seeds],
+        "panel_prefixes": [
+            {"name": name, "actions": list(actions)}
+            for name, actions in panel_prefixes
+        ],
+        "captured_size": int(len(captured_obs)),
+        "skipped_count": int(len(skipped)),
+        "skipped": skipped,
+        "obs_dtype": str(obs_stack.dtype),
+        "obs_shape": [int(x) for x in obs_stack.shape],
+        "items": captured_meta,
+    }
+    return obs_stack, metadata
 
 
 def compute_rollout_action_fractions(rollout_buffer: Any) -> dict[str, Any]:
@@ -258,6 +459,12 @@ class InstrumentedPPO(PPO):
         super().__init__(*args, **kwargs)
         self.probe_records: list = probe_records if probe_records is not None else []
         self._probe_update_idx: int = 0
+        # K3+ fixed observation-conditioning panel slots. Driver attaches via
+        # ``model.fixed_panel_obs_tensor = ...`` and ``model.fixed_panel_metadata
+        # = ...`` AFTER model construction and BEFORE ``model.learn()``. The
+        # tensor MUST be on the same device as the policy (driver responsibility).
+        self.fixed_panel_obs_tensor: th.Tensor | None = None
+        self.fixed_panel_metadata: dict[str, Any] | None = None
 
     def train(self) -> None:
         # --- Pre-update snapshots ---------------------------------------------------
@@ -276,7 +483,15 @@ class InstrumentedPPO(PPO):
         rb_obs_flat = rb_obs.reshape((-1,) + rb_obs.shape[2:])
 
         pre_action_net = snapshot_action_net(self.policy)
-        pre_policy_state = snapshot_rollout_policy_state(self.policy, rb_obs_flat)
+        pre_policy_state = snapshot_policy_state(self.policy, rb_obs_flat)
+        # K3+ pre-update fixed observation-conditioning panel snapshot.
+        # Only fires when a panel has been attached by the driver; the panel
+        # tensor is expected to already be on self.device (moved at attach).
+        pre_fixed_panel_state = None
+        if self.fixed_panel_obs_tensor is not None:
+            pre_fixed_panel_state = snapshot_policy_state(
+                self.policy, self.fixed_panel_obs_tensor
+            )
         rollout_action_stats = compute_rollout_action_fractions(rollout_buffer)
         rollout_episode_stats = compute_rollout_episode_stats(rollout_buffer)
         adv_ret_val_stats = compute_advantage_return_value_stats(rollout_buffer)
@@ -396,7 +611,13 @@ class InstrumentedPPO(PPO):
 
         # --- Post-update snapshots --------------------------------------------------
         post_action_net = snapshot_action_net(self.policy)
-        post_policy_state = snapshot_rollout_policy_state(self.policy, rb_obs_flat)
+        post_policy_state = snapshot_policy_state(self.policy, rb_obs_flat)
+        # K3+ post-update fixed observation-conditioning panel snapshot.
+        post_fixed_panel_state = None
+        if self.fixed_panel_obs_tensor is not None:
+            post_fixed_panel_state = snapshot_policy_state(
+                self.policy, self.fixed_panel_obs_tensor
+            )
 
         # SB3 logging parity (so model.learn() does not break if it
         # consults self.logger between calls).
@@ -462,10 +683,12 @@ class InstrumentedPPO(PPO):
             "pre_update": {
                 "policy_state": pre_policy_state,
                 "action_net": pre_action_net,
+                "fixed_panel_policy_state": pre_fixed_panel_state,
             },
             "post_update": {
                 "policy_state": post_policy_state,
                 "action_net": post_action_net,
+                "fixed_panel_policy_state": post_fixed_panel_state,
             },
             "action_net_delta": action_net_delta,
             "delta_entropy_mean": float(
@@ -505,6 +728,16 @@ class InstrumentedPPO(PPO):
                 "%Y-%m-%dT%H:%M:%SZ", time.gmtime()
             ),
         }
+        # K3+ constant-action-attractor flag on the fixed panel post-update.
+        # GPT contract: failure = top_argmax_fraction >= 0.95 OR num_det_actions < 2.
+        # Absent when no panel is attached (None preserves NDJSON schema clarity).
+        if post_fixed_panel_state is not None:
+            record["fixed_panel_constant_action_attractor"] = bool(
+                post_fixed_panel_state["top_argmax_fraction"] >= 0.95
+                or post_fixed_panel_state["num_det_actions"] < 2
+            )
+        else:
+            record["fixed_panel_constant_action_attractor"] = None
         self.probe_records.append(record)
 
         # Live progress print for the driver log.
@@ -729,6 +962,30 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--label", default="entropy_probe_seed2",
         help="Output filename stem.",
     )
+    p.add_argument(
+        "--policy-net-arch-pi", default=None,
+        help=(
+            "K3+ value-head capacity sweep: override policy_kwargs.net_arch.pi "
+            "as comma-separated ints (example: '64'). Must be passed together "
+            "with --policy-net-arch-vf."
+        ),
+    )
+    p.add_argument(
+        "--policy-net-arch-vf", default=None,
+        help=(
+            "K3+ value-head capacity sweep: override policy_kwargs.net_arch.vf "
+            "as comma-separated ints (example: '128' or '256'). Must be passed "
+            "together with --policy-net-arch-pi."
+        ),
+    )
+    p.add_argument(
+        "--skip-fixed-panel", action="store_true",
+        help=(
+            "K3+ escape hatch: skip building the fixed observation-conditioning "
+            "panel. Use only for debugging the train loop; normal K3+ runs "
+            "MUST build the panel."
+        ),
+    )
     return p
 
 
@@ -748,6 +1005,39 @@ def main(argv: list[str] | None = None) -> int:
     train_seed = int(args.seed)
     total_timesteps = int(args.total_timesteps)
 
+    # K3+ build the fixed observation-conditioning panel FIRST, before any
+    # train env is opened, so only one Godot subprocess is alive at a time.
+    # The panel env is fully closed inside build_fixed_observation_panel
+    # before this returns; only the captured obs tensor and metadata are
+    # retained for in-train per-update snapshots.
+    fixed_panel_obs: np.ndarray | None = None
+    fixed_panel_metadata: dict[str, Any] | None = None
+    if not args.skip_fixed_panel:
+        print(
+            "[h5_training_entropy_probe] building fixed observation panel "
+            "(separate Godot env, closes before training env opens)...",
+            flush=True,
+        )
+        fixed_panel_obs, fixed_panel_metadata = build_fixed_observation_panel(
+            cfg=cfg,
+            godot_extra=godot_extra,
+            train_seed=train_seed,
+            out_dir=out_dir,
+            label=args.label,
+        )
+        print(
+            f"[h5_training_entropy_probe] fixed panel captured "
+            f"{fixed_panel_obs.shape[0]} observations (shape={list(fixed_panel_obs.shape)} "
+            f"dtype={fixed_panel_obs.dtype})",
+            flush=True,
+        )
+    else:
+        print(
+            "[h5_training_entropy_probe] --skip-fixed-panel set; in-train "
+            "panel snapshots will be None.",
+            flush=True,
+        )
+
     # Build the train VecEnv via the same factory the production trainer uses.
     if godot_extra:
         env = make_env(
@@ -766,6 +1056,24 @@ def main(argv: list[str] | None = None) -> int:
     policy = algo_cfg["policy"]
     device = algo_cfg.get("device", "cpu")
 
+    # K3+ value-head capacity sweep: apply CLI net_arch override.
+    if args.policy_net_arch_pi or args.policy_net_arch_vf:
+        if not (args.policy_net_arch_pi and args.policy_net_arch_vf):
+            raise ValueError(
+                "--policy-net-arch-pi and --policy-net-arch-vf must be passed "
+                "together; cannot override one half of net_arch alone."
+            )
+        pi_layers = _parse_int_list(args.policy_net_arch_pi)
+        vf_layers = _parse_int_list(args.policy_net_arch_vf)
+        policy_kwargs = dict(hyperparams.get("policy_kwargs") or {})
+        policy_kwargs["net_arch"] = {"pi": pi_layers, "vf": vf_layers}
+        hyperparams["policy_kwargs"] = policy_kwargs
+        print(
+            f"[h5_training_entropy_probe] policy_kwargs.net_arch override: "
+            f"pi={pi_layers} vf={vf_layers}",
+            flush=True,
+        )
+
     probe_records: list[dict[str, Any]] = []
     model = InstrumentedPPO(
         policy=policy,
@@ -775,6 +1083,20 @@ def main(argv: list[str] | None = None) -> int:
         probe_records=probe_records,
         **hyperparams,
     )
+
+    # K3+ attach the fixed panel tensor on the policy's device. SB3 policies
+    # handle uint8 -> float normalization inside preprocess_obs, so the panel
+    # tensor is passed through with its original dtype to match training-time
+    # rollout obs processing.
+    if fixed_panel_obs is not None:
+        fixed_panel_obs_tensor = th.as_tensor(fixed_panel_obs).to(model.device)
+        model.fixed_panel_obs_tensor = fixed_panel_obs_tensor
+        model.fixed_panel_metadata = fixed_panel_metadata
+        print(
+            f"[h5_training_entropy_probe] panel attached to model "
+            f"(device={model.device}, tensor_dtype={fixed_panel_obs_tensor.dtype})",
+            flush=True,
+        )
 
     print(
         f"[h5_training_entropy_probe] config={args.config} seed={train_seed} "
@@ -823,6 +1145,8 @@ def main(argv: list[str] | None = None) -> int:
         ),
         "vf_coef": float(getattr(model, "vf_coef", 0.5)),
         "max_grad_norm": float(getattr(model, "max_grad_norm", 0.5)),
+        "policy_kwargs": dict(hyperparams.get("policy_kwargs") or {}),
+        "fixed_panel_metadata": fixed_panel_metadata,
         "collapse_thresholds": {
             "entropy_lt": float(COLLAPSE_ENTROPY_LT),
             "top_action_fraction_ge": float(COLLAPSE_TOP_ACTION_FRAC_GE),
@@ -897,7 +1221,74 @@ def main(argv: list[str] | None = None) -> int:
             ),
             "weights_changed": bool(rec["action_net_delta"]["weights_changed"]),
             "collapse_flags": flags,
+            # K3+ fixed-panel post-update digest fields. None when no panel
+            # was attached (--skip-fixed-panel set or panel never built).
+            "fixed_panel_top_argmax_action_post": (
+                rec["post_update"]["fixed_panel_policy_state"]["top_argmax_action"]
+                if rec["post_update"].get("fixed_panel_policy_state") is not None
+                else None
+            ),
+            "fixed_panel_top_argmax_fraction_post": (
+                float(rec["post_update"]["fixed_panel_policy_state"]["top_argmax_fraction"])
+                if rec["post_update"].get("fixed_panel_policy_state") is not None
+                else None
+            ),
+            "fixed_panel_num_det_actions_post": (
+                int(rec["post_update"]["fixed_panel_policy_state"]["num_det_actions"])
+                if rec["post_update"].get("fixed_panel_policy_state") is not None
+                else None
+            ),
+            "fixed_panel_det_argmax_counts_post": (
+                rec["post_update"]["fixed_panel_policy_state"]["det_argmax_counts"]
+                if rec["post_update"].get("fixed_panel_policy_state") is not None
+                else None
+            ),
+            "fixed_panel_mean_logits_post": (
+                rec["post_update"]["fixed_panel_policy_state"]["mean_logits"]
+                if rec["post_update"].get("fixed_panel_policy_state") is not None
+                else None
+            ),
+            "fixed_panel_logit_std_post": (
+                rec["post_update"]["fixed_panel_policy_state"]["logit_std"]
+                if rec["post_update"].get("fixed_panel_policy_state") is not None
+                else None
+            ),
+            "fixed_panel_mean_probs_post": (
+                rec["post_update"]["fixed_panel_policy_state"]["mean_probs"]
+                if rec["post_update"].get("fixed_panel_policy_state") is not None
+                else None
+            ),
+            "fixed_panel_prob_ranges_post": (
+                rec["post_update"]["fixed_panel_policy_state"]["prob_ranges"]
+                if rec["post_update"].get("fixed_panel_policy_state") is not None
+                else None
+            ),
+            "fixed_panel_constant_action_attractor": rec.get(
+                "fixed_panel_constant_action_attractor"
+            ),
         })
+
+    # K3+ observation-conditioning gates. None when no panel was attached.
+    observation_conditioning_min_bar: bool | None = None
+    observation_conditioning_better_bar: bool | None = None
+    if probe_records:
+        final_fixed = probe_records[-1]["post_update"].get(
+            "fixed_panel_policy_state"
+        )
+        if final_fixed is not None:
+            max_explained_variance = max(
+                rec["explained_variance"] for rec in probe_records
+            )
+            observation_conditioning_min_bar = bool(
+                final_fixed["top_argmax_fraction"] < 0.95
+                and final_fixed["num_det_actions"] >= 2
+                and max_explained_variance > 0.0
+            )
+            observation_conditioning_better_bar = bool(
+                final_fixed["top_argmax_fraction"] < 0.80
+                and final_fixed["num_det_actions"] == 3
+                and max_explained_variance > 0.0
+            )
 
     summary = {
         "header": header,
@@ -911,12 +1302,23 @@ def main(argv: list[str] | None = None) -> int:
             probe_records[-1]["post_update"]["policy_state"]
             if probe_records else None
         ),
+        "final_fixed_panel_policy_state": (
+            probe_records[-1]["post_update"].get("fixed_panel_policy_state")
+            if probe_records else None
+        ),
         "initial_action_net": (
             probe_records[0]["pre_update"]["action_net"] if probe_records else None
         ),
         "initial_policy_state": (
             probe_records[0]["pre_update"]["policy_state"] if probe_records else None
         ),
+        "initial_fixed_panel_policy_state": (
+            probe_records[0]["pre_update"].get("fixed_panel_policy_state")
+            if probe_records else None
+        ),
+        "observation_conditioning_min_bar": observation_conditioning_min_bar,
+        "observation_conditioning_better_bar": observation_conditioning_better_bar,
+        "fixed_panel_metadata": fixed_panel_metadata,
     }
     with summary_path.open("w", encoding="utf-8", newline="") as fh:
         json.dump(summary, fh, indent=2)
