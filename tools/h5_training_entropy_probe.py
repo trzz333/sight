@@ -21,7 +21,8 @@ Collapse thresholds for this probe (per GPT plan):
 
 Auto-classification:
 - K-A: entropy collapses in first 1-3 PPO updates
-- K-B: value/advantage signal degenerates before entropy collapse
+- K-B: value/advantage signal degenerates (advantage std collapse AND
+  near-zero explained variance) before entropy collapse
 - K-C: entropy healthy through 2048; recommend rerun to 10000 next session
 - K-D: entropy healthy but argmax/wedge behavior forms anyway;
        recommend K1 architecture probe next
@@ -546,10 +547,12 @@ def classify_collapse(records: list[dict[str, Any]]) -> dict[str, Any]:
     Rules:
     - K-A: any of {entropy, top_action_fraction, margin} crosses its
       threshold by update index 3 (i.e. within first 1-3 updates).
-    - K-B: advantage std collapses to near zero (< 0.05) or
-      explained_variance becomes negative or near zero (< 0.1) before
+    - K-B: advantage std collapses to near zero (< 0.05) AND
+      explained_variance becomes negative or near zero (< 0.10) before
       any entropy threshold crosses. Treated as value/advantage signal
-      degeneration preceding entropy collapse.
+      degeneration preceding entropy collapse. Advantage collapse is
+      the load-bearing signal; low EV alone is normal early in PPO
+      and is supporting evidence, not an independent tripwire.
     - K-C: no threshold crosses through the entire probe.
     - K-D: entropy stays above 0.20 throughout AND raw margin stays
       below 4.0 throughout, but rollout top-action-fraction >= 0.95
@@ -564,10 +567,14 @@ def classify_collapse(records: list[dict[str, Any]]) -> dict[str, Any]:
     flags = [_is_collapsed(r) for r in records]
 
     # Value/advantage degeneration detector for K-B.
+    # AND semantics: advantage collapse is the load-bearing signal; low
+    # explained_variance alone is normal early in PPO (near zero in the
+    # first ~2k timesteps regardless of degeneration) and is supporting
+    # evidence, not an independent tripwire.
     def _value_adv_degenerate(r: dict[str, Any]) -> bool:
         adv_std = r["adv_ret_val_stats"]["advantages"]["std"]
         ev = r["explained_variance"]
-        return bool(adv_std < 0.05 or ev < 0.10)
+        return bool(adv_std < 0.05 and ev < 0.10)
 
     first_entropy_collapse = None
     first_action_collapse = None

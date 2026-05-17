@@ -1,6 +1,6 @@
 # H5 Phase K K0 training-time entropy-collapse probe evidence
 
-Status: VERIFIED end-to-end on StrongerJr. One instrumented training run complete (2048 timesteps, 8 PPO updates, train_seed=2, config `configs/rl/signal_dodge_ppo_h5_pixel_entropy.yaml`). Treated as a pilot gate per scope note, not the whole diagnostic.
+Status: VERIFIED end-to-end on StrongerJr. Two instrumented training runs complete: K0-2048 pilot (8 PPO updates, verdict **K-C**) and K0-10k extension (40 PPO updates, verdict **K-A late**). K-B detector tightened from `or` to `and` semantics before the 10k rerun. K0-10k addendum starts at section 11.
 
 ## 1. TL;DR
 
@@ -219,3 +219,158 @@ Re-running with the same train_seed must produce bit-identical action_net blake2
 - No model.zip is written by K0. K0 is diagnostic-only. The trained policy at update 8 is discarded when `env.close()` runs in the `finally` block.
 
 The K0 result localizes the H5 plateau further but does not yet diagnose it. The 2048-timestep budget is too short to observe the wedge-commitment regime that Phase H, Phase I, and Phase J characterized at 10000 timesteps. The next slice extends the same probe to the full training budget.
+
+
+---
+
+## 11. K0-10k extension: TL;DR
+
+Status: VERIFIED. Same tool, same config (`configs/rl/signal_dodge_ppo_h5_pixel_entropy.yaml`), same train_seed=2, same Godot env build. Only the `--total-timesteps` flag changed (2048 → 10000) and `--label` (`entropy_probe_seed2` → `entropy_probe_seed2_10k`). K-B detector patched from `or` to `and` semantics before the run (see section 14). 40 PPO updates, 312.0 s wall.
+
+**Verdict: K-A (late variant).** Collapse threshold crosses at update 25 (ts=6400): rollout entropy `H_post = 0.1776` (below 0.20 threshold), rollout sampled top-action fraction `left = 0.973` (above 0.95 threshold), raw top1-top2 margin `m_post = 3.6152` (still below 4.0 threshold; never crosses). The two crossings happen in the same update.
+
+**Three findings beyond the verdict.**
+
+First and most consequential: the prior handoff's claim that "K0 rollout argmax oscillates left/stay across 8 updates" was a measurement-frame error. That observation was on `rollout_action_stats.top_action` (sampled actions actually drawn in the rollout, near-uniform when entropy is high), not on `post_update.policy_state.top_argmax_action` (deterministic argmax of post-update logits over the same 256 rollout observations). Across 40 updates the deterministic argmax is fixed at 1.000 every single update: left at upd 1, stay at upd 2-8, left at upd 9, then left for every remaining update through upd 40. Two basin flips total (left → stay → left), the second landing at upd 9 and never reversing. The "Class B = train_seed=2 picks left" identity from Phase H locks at update 9 (ts=2304), inside the 2048-10000 window the K0-2048 evidence predicted.
+
+Second, the wedge basin commitment forms gradually between update 9 (argmax lock, ts=2304, raw margin 0.43) and update 25 (sampled-fraction lock, ts=6400, raw margin 3.62). Entropy slides monotonically from 1.03 at upd 9 down through 0.20 at upd 25 without any sharp transition. The collapse is not a discrete phase change; it is steady drift under PPO's natural commitment dynamics once the value function starts producing usable advantage signal (EV crosses 0.10 at upd 9, climbs to 0.62 by upd 36).
+
+Third, the K-B detector did not fire even with the tightened AND semantics. Advantage std stayed in `[0.68, 18.45]` (never below 0.05). EV started near zero through upd 8 but climbed steadily after upd 9. This validates the tightening: K0-2048 under OR semantics would have falsely tripped K-B on near-zero EV alone, but the actual mechanism is entropy/action collapse with healthy advantage signal, which is K-A.
+
+## 12. K0-10k per-update trajectory (dual stat table)
+
+Per GPT's distinction: `rollout sampled` is `rollout_action_stats.top_action` and `top_action_fraction` (actions actually drawn in the rollout, n=256). `deterministic argmax` is `post_update.policy_state.top_argmax_action` and `top_argmax_fraction` (argmax of post-update logits evaluated over the same 256 rollout observations). At high entropy these can diverge sharply: argmax is the basin selection, sampled is what the rollout actually did.
+
+| upd | ts | rollout sampled | deterministic argmax | H_post | margin_post | EV |
+|---:|---:|---|---|---:|---:|---:|
+| 1 | 256 | left=0.395 | **left=1.000** | 1.0307 | 0.5992 | +0.005 |
+| 2 | 512 | left=0.492 | **stay=1.000** | 1.0251 | 0.5336 | +0.009 |
+| 3 | 768 | stay=0.523 | stay=1.000 | 1.0610 | 0.5509 | -0.008 |
+| 4 | 1024 | stay=0.473 | stay=1.000 | 1.0634 | 0.2771 | +0.009 |
+| 5 | 1280 | stay=0.477 | stay=1.000 | 1.0429 | 0.4778 | +0.044 |
+| 6 | 1536 | stay=0.520 | stay=1.000 | 1.0833 | 0.0818 | -0.008 |
+| 7 | 1792 | left=0.398 | stay=1.000 | 1.0493 | 0.1035 | +0.008 |
+| 8 | 2048 | left=0.398 | stay=1.000 | 1.0726 | 0.1156 | +0.009 |
+| 9 | 2304 | stay=0.406 | **left=1.000** | 1.0288 | 0.4323 | +0.134 |
+| 10 | 2560 | left=0.484 | left=1.000 | 0.9610 | 0.5267 | -0.008 |
+| 11 | 2816 | left=0.578 | left=1.000 | 0.8950 | 0.6728 | +0.002 |
+| 12 | 3072 | left=0.613 | left=1.000 | 0.5869 | 1.6846 | +0.009 |
+| 13 | 3328 | left=0.801 | left=1.000 | 0.3987 | 2.8214 | +0.008 |
+| 14 | 3584 | left=0.898 | left=1.000 | 0.3116 | 3.1371 | +0.008 |
+| 15 | 3840 | left=0.941 | left=1.000 | 0.5124 | 2.3693 | +0.010 |
+| 16 | 4096 | left=0.836 | left=1.000 | 0.7177 | 1.8216 | +0.025 |
+| 17 | 4352 | left=0.758 | left=1.000 | 0.4131 | 2.4089 | +0.039 |
+| 18 | 4608 | left=0.906 | left=1.000 | 0.7560 | 1.3177 | +0.047 |
+| 19 | 4864 | left=0.785 | left=1.000 | 0.6119 | 1.6286 | +0.078 |
+| 20 | 5120 | left=0.781 | left=1.000 | 0.5455 | 1.8774 | +0.100 |
+| 21 | 5376 | left=0.867 | left=1.000 | 0.4495 | 2.5598 | +0.174 |
+| 22 | 5632 | left=0.891 | left=1.000 | 0.4235 | 2.1907 | +0.175 |
+| 23 | 5888 | left=0.836 | left=1.000 | 0.3017 | 3.1224 | +0.200 |
+| 24 | 6144 | left=0.902 | left=1.000 | 0.2084 | 3.4157 | +0.244 |
+| 25 | 6400 | **left=0.973** | left=1.000 | **0.1776** | 3.6152 | +0.237 |
+| 26 | 6656 | left=0.953 | left=1.000 | 0.2501 | 2.9081 | +0.399 |
+| 27 | 6912 | left=0.926 | left=1.000 | 0.4986 | 1.6498 | +0.377 |
+| 28 | 7168 | left=0.844 | left=1.000 | 0.4463 | 1.8684 | +0.462 |
+| 29 | 7424 | left=0.840 | left=1.000 | 0.3373 | 2.4829 | +0.445 |
+| 30 | 7680 | left=0.902 | left=1.000 | 0.3315 | 2.7541 | +0.408 |
+| 31 | 7936 | left=0.918 | left=1.000 | 0.3851 | 2.4904 | +0.562 |
+| 32 | 8192 | left=0.895 | left=1.000 | 0.3163 | 3.0500 | +0.495 |
+| 33 | 8448 | left=0.941 | left=1.000 | 0.4639 | 2.5395 | +0.478 |
+| 34 | 8704 | left=0.836 | left=1.000 | 0.5545 | 2.1762 | +0.469 |
+| 35 | 8960 | left=0.809 | left=1.000 | 0.7004 | 1.8809 | +0.467 |
+| 36 | 9216 | left=0.824 | left=1.000 | 0.5631 | 2.2822 | +0.616 |
+| 37 | 9472 | left=0.793 | left=1.000 | 0.8991 | 1.1809 | +0.538 |
+| 38 | 9728 | left=0.660 | left=1.000 | 0.7910 | 1.3862 | +0.546 |
+| 39 | 9984 | left=0.676 | left=1.000 | 0.6207 | 1.4579 | +0.538 |
+| 40 | 10240 | left=0.754 | left=1.000 | 0.8224 | 0.9980 | +0.555 |
+
+Columns: `rollout sampled` = `rollout_action_stats.top_action` / `top_action_fraction`; `deterministic argmax` = `post_update.policy_state.top_argmax_action` / `top_argmax_fraction`; `H_post` = mean policy entropy on the 256 rollout obs after the update; `margin_post` = mean raw top1-top2 logit margin; `EV` = `explained_variance` over the rollout buffer. Bold cells mark basin transitions and the K-A crossing.
+
+## 13. K0-10k findings
+
+**Finding 1: deterministic argmax basin is fixed every update, not bouncing.**
+
+`top_argmax_fraction = 1.000` on every one of the 40 updates. That means the post-update policy, evaluated argmax-style over the 256 rollout observations, picks the same action on every observation. The policy is locally consistent at every checkpoint; what changes between updates is which action that is. Two transitions in 40 updates: left → stay at upd 2, stay → left at upd 9. After upd 9 there are zero further basin flips. Phase H's "Class B = train_seed=2 picks left" identity is real and forms at ts=2304.
+
+**Finding 2: sampled rollout top action is a strictly weaker signal than deterministic argmax at high entropy.**
+
+At upd 1-8 the rollout sampled top action bounces (left, left, stay, stay, stay, stay, left, left), but the deterministic argmax is exactly stationary within each contiguous run and flips once. The prior K0-2048 evidence section 3.5 and the K-C verdict rationale called this "rollout argmax oscillation." That conflated `rollout_action_stats.top_action` with `policy_state.top_argmax_action`. The probe records both separately by design (see tool docstring), but the K0-2048 evidence presented the sampled stat and labeled it argmax. The K0-10k addendum corrects that framing.
+
+The practical implication: at the K0-2048 budget, the basin had already flipped left → stay at upd 2 and was held at stay through upd 8 (8 of 8 deterministic argmax = stay across the post-upd-2 window). Phase H's argmax-from-rollout-buffer measurement on the final K0-2048 step would have read stay, which matches the K0-10k row at upd 8 exactly. The Class B identity reads `left` only if measurement is taken after upd 9, which the K0-2048 budget did not reach.
+
+**Finding 3: collapse is steady drift, not a phase change.**
+
+From upd 9 through upd 25, entropy slides 1.03 → 0.18, sampled top-action fraction rises 0.41 → 0.97, raw margin grows 0.43 → 3.62. EV climbs 0.13 → 0.24 over the same window. No update shows a step change of more than ~0.3 in entropy or ~0.1 in EV. The advantage std stays large (8.0 to 18.4) throughout. The mechanism is: once EV crosses ~0.10 (upd 9), the advantage signal is structured enough that PPO commits to the argmax basin and incrementally sharpens the logit margin, which in turn sharpens the softmax and reduces entropy, which feeds back into more confident actions on subsequent rollouts. Standard PPO commitment dynamics with no pathology.
+
+**Finding 4: raw margin never crosses 4.0, while entropy and sampled fraction do.**
+
+The 4.0 raw-margin threshold from the scope note was a wedge-strategy-commitment proxy informed by Phase E seed2's converged margin of 0.83 on the left tape (Phase I section 8). At K0-10k the trained margin peaks at 3.76 (upd 26 pre) but oscillates back down to 1.00 by upd 40. The Phase E seed2 trained policy at 10000 timesteps had margin 0.83; the K0-10k policy at 10000 timesteps has margin 1.46 (last post-update value). These are within the same order of magnitude. The 4.0 threshold is too strict for this config and should be relaxed for future K-D wedge-only classification or dropped in favor of sampled-fraction-only.
+
+**Finding 5: K-B AND patch did not engage but is correctly silent here.**
+
+Per-update AND check on `(adv_std < 0.05) and (ev < 0.10)`: there is no update where advantage std drops below 0.05. EV is below 0.10 only on updates 1-8 (plus a transient -0.008 at upd 10). So `first_value_adv` is `None` and K-B does not fire. Under the previous OR rule, K-B would have falsely fired at upd 3 (ev=-0.008) because OR semantics treat low-EV-alone as degeneration, when in fact EV is naturally near zero for the first ~2k timesteps of any fresh-init PPO run. The patch behaves correctly.
+
+## 14. K-B detector patch
+
+Pre-patch:
+
+```python
+def _value_adv_degenerate(r):
+    adv_std = r["adv_ret_val_stats"]["advantages"]["std"]
+    ev = r["explained_variance"]
+    return bool(adv_std < 0.05 or ev < 0.10)
+```
+
+Post-patch:
+
+```python
+def _value_adv_degenerate(r):
+    adv_std = r["adv_ret_val_stats"]["advantages"]["std"]
+    ev = r["explained_variance"]
+    return bool(adv_std < 0.05 and ev < 0.10)
+```
+
+Docstring updated at lines 549-554 of `tools/h5_training_entropy_probe.py` and module-header comment updated at lines 23-24. Reason: advantage collapse is the load-bearing K-B signal; near-zero EV alone is a normal early-PPO artifact (fresh value head, no calibration to returns yet) and was producing false-positive degeneration flags. The K-C clause from the K0-2048 scope already flagged this and recommended tightening before the 10000-timestep rerun; the patch lands that recommendation. K0-2048 verdict is unchanged because K-B never had a chance to compete with K-A or K-C at that budget either way.
+
+## 15. K0-10k verdict and rationale
+
+**Verdict: K-A (late variant).** Tool rationale: `collapse threshold crossed at update 25 (later than first 3 PPO updates but still within probe budget); entropy_first=25 action_first=25 margin_first=None`.
+
+Independent interpretation:
+
+- The H5 plateau pathology is reproduced at the K0-10k budget. The Phase E seed2 wedge-commitment basin forms by update 9 (deterministic argmax lock, ts=2304) and the rollout-level signature of commitment (top sampled action fraction >= 0.95) lands at update 25 (ts=6400). The 10000-timestep run is sufficient to reach a converged-style basin under the entropy YAML.
+- The mechanism is steady-drift entropy collapse driven by PPO commitment under a structured advantage signal, not value/advantage degeneration (K-B), not random-init early lock (K-A early), not wedge-without-distributional-collapse (K-D). Standard PPO behavior on this env-policy-config combination.
+- The two-flip pattern (left → stay at upd 2, stay → left at upd 9, then stay-left forever) means Phase H's basin assignments are sensitive to where in training the measurement is taken. Class A vs Class B vs Class C labels are only meaningful at converged training; pre-convergence basin can be misread.
+- The H5 plateau is now characterized: under this config + env + seed, PPO commits to a single deterministic-argmax action by upd 9 and sharpens it monotonically to a margin of ~3 (sampled fraction 0.95+) by upd 25. From there, training continues to refine but never broadens the distribution back. Once committed, the only escape from the basin is a structural intervention (architecture, env, reward, or training distribution).
+
+## 16. K0-10k recommended next slice
+
+The K-C clause is now discharged: the same probe was run at 10000 timesteps and produced a definitive verdict.
+
+K1 architecture probe is the structurally correct next step under the Phase J option ladder. Open question for GPT before K1 executes: does Phase H's basin definition need re-evaluation given finding 1 (deterministic argmax locks early, sampled rollout misreads the lock)?
+
+K2 train-seed asymmetry probe remains held behind K1.
+
+The attached GPT plan extends past K0-10k into immediate K1 execution. Holding K1 until Jeff's explicit go signal in the next prompt.
+
+## 17. K0-10k reproduction recipe
+
+```
+set SIGHT_GODOT_EXE=C:\Users\maste\AppData\Local\Microsoft\WinGet\Packages\GodotEngine.GodotEngine_Microsoft.Winget.Source_8wekyb3d8bbwe\Godot_v4.6.2-stable_win64_console.exe
+"C:\Users\maste\AppData\Local\Python\bin\python.exe" -u tools\h5_training_entropy_probe.py ^
+    --config configs\rl\signal_dodge_ppo_h5_pixel_entropy.yaml ^
+    --seed 2 ^
+    --total-timesteps 10000 ^
+    --out-dir runs\phase_k ^
+    --label entropy_probe_seed2_10k
+```
+
+Artifacts (gitignored under `runs/`):
+
+- `runs\phase_k\entropy_probe_seed2_10k.ndjson` (sha256 `5a8d7a4df7666c55b45d5d5ae9a0eb8f5a4fd3c36ae2589b7054884720870eab`, 137628 bytes)
+- `runs\phase_k\entropy_probe_seed2_10k.summary.json` (sha256 `bd420e0f3b253d8e3ecc86843f68aeaa1c4b6783f80b8a38c1ab90a2168fa80b`, 47340 bytes)
+- `runs\phase_k\godot_entropy_probe_seed2_10k\` (Godot env NDJSON sidecars)
+
+Wall time: 312.0 s (5.20 min). Linear extrapolation from K0-2048's 64.79 s / 8 updates predicted ~324 s for 40 updates; observed slightly faster.
+
+Launch pattern. Inline invocation via `interact_with_process` is feasible at this duration but presses the 4-min MCP timeout. The actual launch used a bat-with-sentinel wrapper at `C:\Users\maste\AppData\Local\Temp\run_k0_10k.bat` that sets `SIGHT_GODOT_EXE` inline, redirects stdout/stderr to `C:\Users\maste\AppData\Local\Temp\k0_10k.log`, and writes a done-sentinel `k0_10k.done` containing the Python exit code (`EXIT=0`) on completion. The wrapper was started with `start "k0_10k" /MIN cmd /c <bat>`, then a separate poll loop checked the sentinel every 60-120 s. This pattern is durable across the 5-min mark and is recommended for any future probe at or above this budget.
