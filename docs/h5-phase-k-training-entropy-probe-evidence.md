@@ -534,3 +534,163 @@ Config differences vs the unmodified entropy YAML (`configs\rl\signal_dodge_ppo_
 - No other field differs.
 
 `per_update_digest` schema now includes (`tools/h5_training_entropy_probe.py` digest patch this session): `det_argmax_pre`, `det_argmax_fraction_pre`, `det_argmax_post`, `det_argmax_fraction_post`, `policy_prob_left_post`, `policy_prob_stay_post`, `policy_prob_right_post`. These fields were always recorded in the full NDJSON records under `pre_update.policy_state` and `post_update.policy_state`; the patch only hoists them into the per-update digest so analysis tooling does not need to walk the full NDJSON.
+
+
+## 25. K2 baseline shared-head train-seed asymmetry probe (overview)
+
+K2 reruns the K0-10k baseline recipe (shared NatureCNN head, no `policy_kwargs.net_arch` override) at `train_seed in {1, 3, 4}` to test whether the K0-10k wedge is seed-specific or architectural. K1 already showed the wedge does not reproduce when the policy and value heads are split into separate 64-unit MLPs. K2 fixes the architecture at K0's setting and varies the seed.
+
+Config: `configs\rl\signal_dodge_ppo_h5_pixel_entropy.yaml` unchanged from K0-10k. Probe tool: `tools\h5_training_entropy_probe.py` (digest patch from K1 session). Total timesteps: 10000 per seed. Three runs executed serially via bat-with-sentinel wrapper at `C:\Users\maste\AppData\Local\Temp\sight_k2\run_k2_serial.bat`. Wall times 311.9 s / 312.4 s / 312.7 s for seeds 1 / 3 / 4 (essentially identical to K0-10k seed 2's 312.0 s).
+
+Artifact locations (all under `runs\phase_k\`, gitignored):
+
+- `entropy_probe_seed1_10k_k2_baseline.{ndjson,summary.json}`
+- `entropy_probe_seed3_10k_k2_baseline.{ndjson,summary.json}`
+- `entropy_probe_seed4_10k_k2_baseline.{ndjson,summary.json}`
+
+## 26. K2 per-seed evidence
+
+### 26.1 Seed 1
+
+- Verdict: `K-A`. Probe-classifier rationale: collapse threshold crossed at update 8 (later than first 3 PPO updates but still within probe budget); entropy_first=8, action_first=9, margin_first=8.
+- First entropy collapse update (entropy_post < 0.20): **8**.
+- First rollout top-action fraction collapse update (>= 0.95): **9**.
+- First raw-margin collapse update (>= 4.0): **8**.
+- Deterministic argmax trajectory: `stay` upd 1-40 (no oscillation; locked from update 1).
+- First permanent det_argmax lock update: **1**.
+- Entropy floor: 0.0024. Entropy ceiling: 1.0843. Final entropy_post: 0.0114.
+- Rollout top-action fraction ceiling: 1.0000. Final: 0.9922.
+- Raw margin ceiling: 8.2659. Final margin_post: 6.5180.
+- Explained variance: min -0.0588, max 0.3581. First positive: update **1**.
+- Advantage std range: [0.2916, 15.6277].
+- Final mean policy probs: L=0.0000, S=0.9985, R=0.0015.
+- Final deterministic argmax: `stay` (frac=1.0000). Initial deterministic argmax: `right` (frac=1.0000).
+- Wall: 311.9 s. n_updates: 40.
+- Artifact sha256:
+  - summary: `71acb32d4c086c4dbc4fbc48827ac31777ed1ff54959a7842e16368d3fa5a134`
+  - ndjson: `3fed5642fdd89e3ccff4d74f25e9fa6fcd99d9537fa699f1962e5945a27a8d21`
+
+### 26.2 Seed 3
+
+- Verdict: `K-A`. Probe-classifier rationale: collapse threshold crossed at update 20 (later than first 3 PPO updates but still within probe budget); entropy_first=20, action_first=21, margin_first=20.
+- First entropy collapse update: **20**.
+- First rollout top-action fraction collapse update: **21**.
+- First raw-margin collapse update: **20**.
+- Deterministic argmax trajectory: `left` upd 1, `right` upd 2-6, `left` upd 7-8, `right` upd 9, `left` upd 10-13, `right` upd 14, `left` upd 15-40.
+- First permanent det_argmax lock update: **15**.
+- Entropy floor: 0.0000. Entropy ceiling: 0.9764. Final entropy_post: 0.0001.
+- Rollout top-action fraction ceiling: 1.0000. Final: 1.0000.
+- Raw margin ceiling: 13.0672. Final margin_post: 11.7210.
+- Explained variance: min -0.3900, max 0.2507. First positive: update **2**.
+- Advantage std range: [0.2272, 16.4744].
+- Final mean policy probs: L=1.0000, S=0.0000, R=0.0000.
+- Final deterministic argmax: `left` (frac=1.0000). Initial deterministic argmax: `stay` (frac=1.0000).
+- Wall: 312.4 s. n_updates: 40.
+- Artifact sha256:
+  - summary: `f6aaeea96fa9875d0b60c8184473119e5fbba61532c43081c717a618b9d7dda5`
+  - ndjson: `aa522e645e6b3383d9d496120a32592a759dcca9bffb9080afa6edb96ad4d9ed`
+
+### 26.3 Seed 4
+
+- Verdict: `K-A`. Probe-classifier rationale: collapse threshold crossed at update 13 (later than first 3 PPO updates but still within probe budget); entropy_first=13, action_first=14, margin_first=13.
+- First entropy collapse update: **13**.
+- First rollout top-action fraction collapse update: **14**.
+- First raw-margin collapse update: **13**.
+- Deterministic argmax trajectory: `right` upd 1, `left` upd 2, `right` upd 3-11, `left` upd 12-40.
+- First permanent det_argmax lock update: **12**.
+- Entropy floor: 0.0037. Entropy ceiling: 1.0914. Final entropy_post: 0.0074.
+- Rollout top-action fraction ceiling: 1.0000. Final: 1.0000.
+- Raw margin ceiling: 8.1455. Final margin_post: 7.4217.
+- Explained variance: min -0.2119, max 0.4436. First positive: update **1**.
+- Advantage std range: [0.1410, 14.6133].
+- Final mean policy probs: L=0.9991, S=0.0003, R=0.0006.
+- Final deterministic argmax: `left` (frac=1.0000). Initial deterministic argmax: `left` (frac=1.0000).
+- Wall: 312.7 s. n_updates: 40.
+- Artifact sha256:
+  - summary: `7cd7265d12b8d69d76c4e280366c65411805fc45306cca17c373da59ba632122`
+  - ndjson: `74888472f4bc8c6f5b6ddc2d5ec2da3b66df8b7c428e035147efce31a3883efd`
+
+## 27. K2 cross-seed comparison (with K0-10k seed 2 and K1 seed 2)
+
+All rows are 10000-timestep, 40 PPO updates, entropy recipe (`signal_dodge_ppo_h5_pixel_entropy.yaml` or the K1 sibling). "Shared head" means CnnPolicy default (NatureCNN feature extractor with shared MLP head); "Split 64/64" means `policy_kwargs.net_arch = dict(pi=[64], vf=[64])`.
+
+| seed | arch | verdict | ent collapse upd | margin collapse upd | top-action-frac collapse upd | det_argmax permanent lock upd | final det_argmax | final mean probs L / S / R | max raw margin | EV first positive upd | adv std max |
+|-----:|------|---------|-----------------:|-------------------:|----------------------------:|------------------------------:|------------------|---------------------------|---------------:|---------------------:|------------:|
+| 2 | shared | K-A | 25 | none (< 4.0) | 25 | 10 | left | 0.664 / 0.090 / 0.247 | 3.62 | 1 | 18.45 |
+| 1 | shared | K-A | 8  | 8  | 9  | 1  | stay | 0.000 / 0.999 / 0.001 | 8.27 | 1 | 15.63 |
+| 3 | shared | K-A | 20 | 20 | 21 | 15 | left | 1.000 / 0.000 / 0.000 | 13.07 | 2 | 16.47 |
+| 4 | shared | K-A | 13 | 13 | 14 | 12 | left | 0.999 / 0.000 / 0.001 | 8.15 | 1 | 14.61 |
+| 2 | split 64/64 | K-C | none | none | none | none (oscillating) | right (upd 40) | 0.433 / 0.109 / 0.459 | 0.66 | none (EV stuck ≤ 0) | 6.35 |
+
+Key observations:
+
+1. **All four shared-head seeds wedge to verdict K-A within 10k timesteps.** No shared-head seed escaped the collapse classifier. The K0-10k wedge is **not** a seed 2 artifact.
+2. **K2 seeds 1/3/4 collapse harder than K0-10k seed 2.** K0-10k seed 2 never crossed the margin >= 4.0 threshold (max 3.62) and ended with entropy 0.82 and mean prob L=0.66. All three K2 seeds crossed margin >= 4.0 (8.27, 13.07, 8.15), bottomed out with entropy approximately 0 (0.011, 0.0001, 0.007), and ended with the dominant-action prob approximately 1.0. K0-10k seed 2 is the **mildest** shared-head wedge of the four, not the most representative.
+3. **Basin choice is seed-dependent under the same architecture.** Three of four shared-head seeds wedge to `left`; one (seed 1) wedges to `stay`. None of the tested seeds wedged to `right`. The "left-wall" framing of the K0-10k narrative is incomplete; the shared-head architecture wedges into *some* constant action, not specifically `left`.
+4. **Lock-in timing varies widely.** Permanent det_argmax lock occurs at upd 1 (seed 1), upd 10 (seed 2), upd 12 (seed 4), and upd 15 (seed 3). Seed 1 wedges immediately and stably; the other three oscillate briefly before committing. K1 (split 64/64) is the only configuration that never locks within 40 updates.
+5. **K1 remains the only configuration with no value-learning signal at 10k.** EV stays at or below zero across all 40 updates in K1; every shared-head run has EV first positive within the first two updates and reaches non-trivial EV (>= 0.25 max) in seeds 1 and 4.
+
+## 28. K2 verdict and decision-rule mapping
+
+Verdict against the GPT decision rule (from the K2 scoping turn):
+
+- **Primary outcome: K2-A.** All or most seeds wedge under shared-head. Specifically, 4/4 tested seeds (2 from K0-10k, 1/3/4 from K2) produce verdict K-A under the shared-head recipe. The shared-head architecture is implicated; the wedge is not a seed 2 artifact. Per GPT's rule, the next architectural slice should be value-head capacity sweep rather than more baseline seeds.
+- **Secondary outcome: constant-policy attractor that is not specifically `left`.** Seed 1 collapses to `stay`, seeds 2/3/4 collapse to `left`, none to `right`. This is the GPT decision-rule scoping note: "If seeds wedge but choose different actions, the project has a general constant-policy attractor problem, not a left-wall-only problem." Both readings apply simultaneously.
+- **K2-D explicitly ruled out.** "No seeds wedge" is false; every seed wedged.
+- **K2-B ("only seed 2 wedges, K0-10k is seed-specific") explicitly ruled out** by 3/3 K2 seeds also producing K-A with sharper collapses than seed 2.
+- **K2-C ("mixed pattern, treat as architecture-seed interaction") partially applies** in the sense that *which* action the basin settles into depends on the seed; but it does not apply in the sense GPT scoped it, because every seed in fact wedged. The verdict is K2-A primarily, with a K2-C-flavored basin asymmetry as a sub-result.
+
+## 29. K2 honest reads
+
+1. **The shared-head + entropy recipe produces a constant-action deterministic basin by 10k timesteps with high reliability across seeds.** This is now a four-seed result, not a one-seed observation. The mechanism is architectural under the K2 evidence.
+2. **K0-10k seed 2 is unusually mild relative to its peers.** Final entropy 0.82, max margin 3.62, mean prob L=0.66 — these are the *weakest* collapse signals among the four shared-head seeds tested. The K0 narrative would be sharper if seed 2 were replaced with seed 3 or seed 4 as the canonical reference. The Demo-0 visualization happens to be on the mildest seed; if Demo-0 were rerun on a K2-seed-1 trained policy, the paddle would visibly hold `stay` for 1800 steps with the same "constant action" character but a different action choice.
+3. **The constant-policy attractor is not the same as a "left-wall" attractor.** Three of four seeds did wedge to `left`, but seed 1 wedged to `stay` with essentially zero probability of any other action. Any future framing that says "the policy hugs the left wall" overstates the regularity; the policy commits to *one* of the three actions and abandons the others.
+4. **Value-learning is not by itself the wedge mechanism.** Every shared-head seed has EV positive within the first two updates and three of four reach non-trivial EV. The wedge happens *despite* a working value signal, not because of its absence. K1's value-head failure is downstream of architecture (split heads, smaller capacity), not a precondition for the K0-style wedge.
+5. **K1 still looks like an architecture effect under K2.** K1's failure to wedge happens at a configuration where the value head shows no learning signal (EV stuck) and the policy oscillates rather than committing. K2 confirms shared-head wedges across seeds; K1's non-wedge therefore is the architectural lever, even if K1 itself does not produce a competent policy.
+
+## 30. K2 reproduction recipe
+
+From `C:\Projects\Sight` in cmd.exe, with `SIGHT_GODOT_EXE` set inline in the same shell or the launching .bat:
+
+```
+set SIGHT_GODOT_EXE=C:\Users\maste\AppData\Local\Microsoft\WinGet\Packages\GodotEngine.GodotEngine_Microsoft.Winget.Source_8wekyb3d8bbwe\Godot_v4.6.2-stable_win64_console.exe
+
+"C:\Users\maste\AppData\Local\Python\bin\python.exe" -u tools\h5_training_entropy_probe.py ^
+  --config configs\rl\signal_dodge_ppo_h5_pixel_entropy.yaml ^
+  --seed 1 ^
+  --total-timesteps 10000 ^
+  --out-dir runs\phase_k ^
+  --label entropy_probe_seed1_10k_k2_baseline
+
+"C:\Users\maste\AppData\Local\Python\bin\python.exe" -u tools\h5_training_entropy_probe.py ^
+  --config configs\rl\signal_dodge_ppo_h5_pixel_entropy.yaml ^
+  --seed 3 ^
+  --total-timesteps 10000 ^
+  --out-dir runs\phase_k ^
+  --label entropy_probe_seed3_10k_k2_baseline
+
+"C:\Users\maste\AppData\Local\Python\bin\python.exe" -u tools\h5_training_entropy_probe.py ^
+  --config configs\rl\signal_dodge_ppo_h5_pixel_entropy.yaml ^
+  --seed 4 ^
+  --total-timesteps 10000 ^
+  --out-dir runs\phase_k ^
+  --label entropy_probe_seed4_10k_k2_baseline
+```
+
+Wall: ~312 s per seed on StrongerJr, ~16 min total serial. Tool-call budget: exceeds the inline MCP 4-minute timeout per seed; use bat-with-sentinel pattern (template at `C:\Users\maste\AppData\Local\Temp\sight_k2\run_k2_serial.bat`). The serial bat runs all three seeds in one process and writes a single sentinel with `seed1=<rc> seed3=<rc> seed4=<rc>` on completion.
+
+No config edits required vs. K0-10k. K2 uses the unmodified `signal_dodge_ppo_h5_pixel_entropy.yaml`; the only variable is `--seed`. This is intentional: K2's hypothesis is that nothing but the seed differs between K0-10k seed 2 and the K2 runs, and the comparison is only valid if the YAML is identical.
+
+## 31. What K2 closes and what it opens
+
+Closed:
+
+- The hypothesis that K0-10k's wedge was a seed 2 artifact. Falsified. All four shared-head seeds wedge.
+- The hypothesis that the wedge is specifically a "left-wall" basin. Falsified. Seed 1 wedges to `stay` with no other actions in the rollout.
+- The hypothesis that K1's non-wedge could be a seed effect rather than an architecture effect. Falsified relative to seeds 1/3/4: under shared head, every tested seed wedges.
+
+Opened:
+
+- **Value-head capacity sweep.** K1 split (64, 64) MLP heads produced no value-learning signal at 10k. The next architectural probe should sweep value-head capacity (for example, vf=[128], vf=[256], or shared vf with frozen pi) to find the minimum value head that enables observation-conditional commitment rather than constant-action collapse. K1-extended (rerun K1 to 30k or 50k) remains parked but is now lower priority than a capacity sweep, because K2 makes the architectural mechanism more central than the budget mechanism.
+- **Basin-choice mechanism.** Why does seed 1 commit to `stay` while seeds 2/3/4 commit to `left`? The answer is presumably in early rollout statistics; seed 1's first rollout already top-actions `stay`, and seeds 2/3/4 top-action `left` or `stay`/`right` early but converge to `left`. A short investigative slice on initial weight init plus first-rollout action statistics would close this question without further training.
+- **Whether the constant-action attractor is a property of CnnPolicy specifically.** Every probe so far uses CnnPolicy on pixels. A control run with `MlpPolicy` on state observations under the same env would test whether the attractor is policy-architecture-specific or env-specific. This is out of K-series scope but worth naming for later.
