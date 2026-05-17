@@ -857,6 +857,23 @@ def main(argv: list[str] | None = None) -> int:
             "rollout_right_fraction": float(
                 rec["rollout_action_stats"]["fractions"]["right"]
             ),
+            "det_argmax_pre": rec["pre_update"]["policy_state"]["top_argmax_action"],
+            "det_argmax_fraction_pre": float(
+                rec["pre_update"]["policy_state"]["top_argmax_fraction"]
+            ),
+            "det_argmax_post": rec["post_update"]["policy_state"]["top_argmax_action"],
+            "det_argmax_fraction_post": float(
+                rec["post_update"]["policy_state"]["top_argmax_fraction"]
+            ),
+            "policy_prob_left_post": float(
+                rec["post_update"]["policy_state"]["mean_probs"]["left"]
+            ),
+            "policy_prob_stay_post": float(
+                rec["post_update"]["policy_state"]["mean_probs"]["stay"]
+            ),
+            "policy_prob_right_post": float(
+                rec["post_update"]["policy_state"]["mean_probs"]["right"]
+            ),
             "entropy_pre": float(rec["pre_update"]["policy_state"]["entropy_mean"]),
             "entropy_post": float(rec["post_update"]["policy_state"]["entropy_mean"]),
             "margin_pre": float(rec["pre_update"]["policy_state"]["margin_mean"]),

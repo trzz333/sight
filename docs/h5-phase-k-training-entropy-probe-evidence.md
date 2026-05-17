@@ -374,3 +374,163 @@ Artifacts (gitignored under `runs/`):
 Wall time: 312.0 s (5.20 min). Linear extrapolation from K0-2048's 64.79 s / 8 updates predicted ~324 s for 40 updates; observed slightly faster.
 
 Launch pattern. Inline invocation via `interact_with_process` is feasible at this duration but presses the 4-min MCP timeout. The actual launch used a bat-with-sentinel wrapper at `C:\Users\maste\AppData\Local\Temp\run_k0_10k.bat` that sets `SIGHT_GODOT_EXE` inline, redirects stdout/stderr to `C:\Users\maste\AppData\Local\Temp\k0_10k.log`, and writes a done-sentinel `k0_10k.done` containing the Python exit code (`EXIT=0`) on completion. The wrapper was started with `start "k0_10k" /MIN cmd /c <bat>`, then a separate poll loop checked the sentinel every 60-120 s. This pattern is durable across the 5-min mark and is recommended for any future probe at or above this budget.
+
+## 18. K1 architecture mechanism probe: TL;DR
+
+K1 swaps the default SB3 CnnPolicy MLP head for an explicit `policy_kwargs.net_arch = dict(pi=[64], vf=[64])`, holding everything else identical to the entropy YAML. One instrumented 10000-timestep training session, train_seed=2, 40 PPO updates, 311.5 s wall (essentially equal to K0-10k's 312.0 s).
+
+K1 verdict: **K-C**, no collapse threshold crossed across 40 updates. Entropy stayed in [0.96, 1.10], sampled top-action fraction stayed in [0.34, 0.55] (max 0.547), raw margin stayed under 0.66. The K0-10k wedge mechanism does not reproduce under separated pi/vf MLP heads at this budget.
+
+Critical caveats:
+
+- Deterministic argmax `det_argmax_fraction_post` is still 1.0 every update, i.e. inside any single 256-step rollout the policy still picks one action across all observations. The architecture intervention did not produce per-observation conditional behavior. It produced **basin-shifting commitment**: the chosen action changes across updates (left → right at upd 8, right → left at upd 24, left → right at upd 39) rather than staying observation-invariant `left`.
+- Explained variance never crosses zero in K1. The value head with 64-unit MLP fails to learn meaningful return predictions inside the 10k budget. K0-10k crossed ev=0.10 at upd 9. K1 produces no value signal, which is the mechanical reason commitment never sharpens enough to trigger the collapse thresholds.
+- Final policy probs are roughly balanced: left=0.43, stay=0.11, right=0.46. K0-10k's final policy concentrated on `left`.
+
+Read: **K1 changed the mechanism, but not by teaching the policy to dodge. It changed the mechanism by hobbling the value head enough that PPO never gathers structured advantage to commit on.** This matches the K1 decision-rule entry GPT outlined: "Different-basin result: deterministic argmax locks to stay or right; that is not automatically a win. It means architecture changed basin selection, not necessarily observation-conditioned learning."
+
+K1 is therefore a productive mechanism probe (the wedge does not reproduce), but it is not a competence win. The next slice should either extend K1 training budget to see whether the value head ever learns, or move to K2 train-seed asymmetry to test whether the K0-10k wedge was seed-specific, or both.
+
+Artifact sha256:
+
+- `runs/phase_k/entropy_probe_seed2_10k_k1_netarch.ndjson`        `5e8cb430e67b93674848e4f388f08f9b7c47eff0c890c1e25621d07421c40cdf`
+- `runs/phase_k/entropy_probe_seed2_10k_k1_netarch.summary.json`  `48f24a71b7d454724a96617aa415a5dd34d6baf258712d7b8bc2409fa86f1b84`
+
+Both gitignored under `runs/phase_k/`.
+
+
+## 19. K1 vs K0-10k headline comparison
+
+| Metric | K0-10k (shared MLP head) | K1 (`net_arch=dict(pi=[64], vf=[64])`) |
+|---|---|---|
+| Verdict | K-A late | K-C |
+| Wall seconds | 312.0 | 311.5 |
+| Updates | 40 | 40 |
+| Final entropy (upd 40, post) | 0.18 | 0.96 |
+| Min entropy across run | ~0.18 (upd 25) | 0.96 (monotone floor, upd 40) |
+| Max sampled top-action fraction | 0.97 (upd 25) | 0.547 (upd 37) |
+| Max raw margin (post) | 3.76 (upd 26 pre) | 0.66 (upd 15) |
+| Deterministic argmax locked to single action? | Yes, `left` from upd 9 onward | No, oscillates: left→right at upd 8, right→left at upd 24, left→right at upd 39 |
+| `det_argmax_fraction_post` within an update | 1.0 throughout | 1.0 throughout (per-update single action; differs across updates) |
+| EV crosses 0.10? | Yes, at upd 9 | No (stays ~0 throughout) |
+| Advantage std range | [0.68, 18.45] | [2.21, 6.35] (narrower, never explodes) |
+| Final mean policy probs | concentrated on `left` | left 0.43, stay 0.11, right 0.46 |
+| Collapse thresholds crossed | entropy < 0.20 and sampled top-action ≥ 0.95 at upd 25 | none |
+
+Interpretation: K0-10k showed the canonical PPO wedge — value head learns enough structure to drive policy commitment, advantage std climbs, margin sharpens, entropy collapses. K1 short-circuits this by giving the value head insufficient capacity to learn returns inside the budget. The wedge cannot form because the gradient signal to form it never appears. Policy stays high-entropy and basin-shifts across updates.
+
+## 20. K1 per-update digest
+
+40 rows. Columns:
+
+- `upd` — PPO update index.
+- `ts` — total timesteps after this update.
+- `top` — `rollout_top_action` (sampled top action over the 256 rollout obs).
+- `top_frac` — `rollout_top_action_fraction`.
+- `det_pre` / `det_post` — deterministic argmax over the same 256 obs, before and after the update.
+- `H_pre` / `H_post` — mean policy entropy before and after the update.
+- `marg_post` — mean raw top1-top2 margin after the update.
+- `adv_std` — advantage std for this update's minibatch.
+- `EV` — explained variance for this update.
+- `p_left` / `p_right` — post-update mean policy probability for `left` and `right` (`stay` = 1 - p_left - p_right - rounding).
+
+```
+| upd |  ts | top   | top_frac | det_pre | det_post | H_pre | H_post | marg_post | adv_std |   EV   | p_left | p_right |
+|-----|-----|-------|----------|---------|----------|-------|--------|-----------|---------|--------|--------|---------|
+|   1 |  256| stay  |   0.36   |  stay   |  left    | 1.10  | 1.10   |   0.03    |  2.71   | -0.007 |  0.35  |  0.30   |
+|   2 |  512| left  |   0.35   |  left   |  left    | 1.10  | 1.10   |   0.06    |  4.27   | -0.000 |  0.36  |  0.30   |
+|   3 |  768| left  |   0.37   |  left   |  left    | 1.10  | 1.10   |   0.06    |  2.53   |  0.000 |  0.36  |  0.30   |
+|   4 | 1024| left  |   0.34   |  left   |  stay    | 1.10  | 1.09   |   0.05    |  2.52   |  0.000 |  0.35  |  0.29   |
+|   5 | 1280| stay  |   0.41   |  stay   |  stay    | 1.09  | 1.09   |   0.22    |  4.39   |  0.000 |  0.30  |  0.31   |
+|   6 | 1536| stay  |   0.43   |  stay   |  stay    | 1.09  | 1.08   |   0.25    |  2.50   |  0.000 |  0.27  |  0.32   |
+|   7 | 1792| stay  |   0.44   |  stay   |  stay    | 1.08  | 1.09   |   0.18    |  4.51   |  0.000 |  0.27  |  0.33   |
+|   8 | 2048| stay  |   0.41   |  stay   |  right   | 1.09  | 1.09   |   0.04    |  4.49   |  0.000 |  0.26  |  0.38   |
+|   9 | 2304| right |   0.42   |  right  |  right   | 1.09  | 1.07   |   0.41    |  2.48   |  0.000 |  0.25  |  0.45   |
+|  10 | 2560| right |   0.45   |  right  |  right   | 1.07  | 1.05   |   0.45    |  2.47   |  0.000 |  0.23  |  0.47   |
+|  11 | 2816| right |   0.48   |  right  |  right   | 1.05  | 1.04   |   0.24    |  2.46   |  0.000 |  0.19  |  0.46   |
+|  12 | 3072| right |   0.43   |  right  |  right   | 1.04  | 1.03   |   0.06    |  2.45   |  0.000 |  0.17  |  0.43   |
+|  13 | 3328| stay  |   0.42   |  right  |  right   | 1.03  | 1.04   |   0.08    |  2.44   |  0.000 |  0.18  |  0.43   |
+|  14 | 3584| right |   0.41   |  right  |  right   | 1.04  | 1.04   |   0.44    |  4.73   |  0.000 |  0.21  |  0.48   |
+|  15 | 3840| right |   0.46   |  right  |  right   | 1.04  | 1.03   |   0.66    |  2.43   | -0.000 |  0.23  |  0.51   |
+|  16 | 4096| right |   0.53   |  right  |  right   | 1.03  | 1.03   |   0.64    |  2.42   |  0.000 |  0.23  |  0.51   |
+|  17 | 4352| right |   0.46   |  right  |  right   | 1.03  | 1.07   |   0.39    |  2.41   |  0.000 |  0.25  |  0.45   |
+|  18 | 4608| right |   0.45   |  right  |  right   | 1.07  | 1.09   |   0.20    |  2.40   | -0.000 |  0.32  |  0.39   |
+|  19 | 4864| right |   0.38   |  right  |  right   | 1.09  | 1.09   |   0.07    |  4.86   |  0.000 |  0.35  |  0.38   |
+|  20 | 5120| stay  |   0.35   |  right  |  left    | 1.09  | 1.08   |   0.03    |  2.38   |  0.000 |  0.39  |  0.37   |
+|  21 | 5376| right |   0.38   |  left   |  right   | 1.08  | 1.08   |   0.03    |  4.94   | -0.000 |  0.37  |  0.38   |
+|  22 | 5632| right |   0.41   |  right  |  right   | 1.08  | 1.06   |   0.36    |  2.37   |  0.000 |  0.32  |  0.45   |
+|  23 | 5888| right |   0.44   |  right  |  right   | 1.06  | 1.06   |   0.31    |  6.35   |  0.000 |  0.33  |  0.45   |
+|  24 | 6144| right |   0.43   |  right  |  left    | 1.06  | 1.07   |   0.10    |  5.05   |  0.000 |  0.41  |  0.37   |
+|  25 | 6400| left  |   0.42   |  left   |  left    | 1.07  | 1.07   |   0.07    |  2.34   |  0.000 |  0.40  |  0.37   |
+|  26 | 6656| left  |   0.40   |  left   |  left    | 1.07  | 1.06   |   0.09    |  2.33   |  0.000 |  0.41  |  0.38   |
+|  27 | 6912| left  |   0.43   |  left   |  left    | 1.06  | 1.02   |   0.14    |  5.21   | -0.000 |  0.45  |  0.39   |
+|  28 | 7168| left  |   0.47   |  left   |  left    | 1.02  | 1.02   |   0.11    |  2.31   |  0.000 |  0.44  |  0.40   |
+|  29 | 7424| left  |   0.44   |  left   |  left    | 1.02  | 1.02   |   0.33    |  5.24   |  0.000 |  0.48  |  0.35   |
+|  30 | 7680| left  |   0.51   |  left   |  left    | 1.02  | 1.00   |   0.52    |  2.30   |  0.000 |  0.52  |  0.31   |
+|  31 | 7936| left  |   0.54   |  left   |  left    | 1.00  | 1.00   |   0.48    |  2.29   |  0.000 |  0.52  |  0.32   |
+|  32 | 8192| left  |   0.45   |  left   |  left    | 1.00  | 1.02   |   0.24    |  5.42   |  0.000 |  0.47  |  0.37   |
+|  33 | 8448| left  |   0.48   |  left   |  left    | 1.02  | 1.02   |   0.30    |  2.27   | -0.000 |  0.48  |  0.35   |
+|  34 | 8704| left  |   0.47   |  left   |  left    | 1.02  | 1.01   |   0.40    |  2.26   |  0.000 |  0.50  |  0.34   |
+|  35 | 8960| left  |   0.50   |  left   |  left    | 1.01  | 0.99   |   0.53    |  2.25   |  0.000 |  0.53  |  0.31   |
+|  36 | 9216| left  |   0.49   |  left   |  left    | 0.99  | 0.99   |   0.57    |  5.55   |  0.000 |  0.54  |  0.30   |
+|  37 | 9472| left  |   0.55   |  left   |  left    | 0.99  | 1.00   |   0.29    |  5.54   |  0.000 |  0.49  |  0.36   |
+|  38 | 9728| left  |   0.45   |  left   |  left    | 1.00  | 1.01   |   0.11    |  2.23   |  0.000 |  0.45  |  0.40   |
+|  39 | 9984| left  |   0.45   |  left   |  right   | 1.01  | 0.99   |   0.05    |  5.63   | -0.000 |  0.42  |  0.45   |
+|  40 |10240| right |   0.48   |  right  |  right   | 0.99  | 0.96   |   0.06    |  2.21   |  0.000 |  0.43  |  0.46   |
+```
+
+Three deterministic basin transitions visible at update 8 (left→right), update 24 (right→left), and update 39 (left→right). Compare to K0-10k where the only transitions were update 2 (left→stay) and update 9 (stay→left), after which `left` held through update 40.
+
+## 21. K1 findings
+
+1. **The K0-10k wedge mechanism does not reproduce under separated pi/vf MLP heads at the same budget.** No collapse threshold crossed. Entropy floor 0.96, sampled top-action fraction ceiling 0.547, raw margin ceiling 0.66. The "agent gets stuck on `left` forever" lock-in K0-10k diagnosed is absent. This is a real mechanism effect, not a noise effect: the K0-10k probe was bit-deterministic on this seed and recipe; only the architecture kwarg changed.
+
+2. **Architecture did not produce observation-conditional behavior; it produced basin-shifting commitment.** Within any single PPO update, the K1 policy still picks one action deterministically across all 256 rollout observations (`det_argmax_fraction_post=1.0` every update). What changed is that the chosen action shifts across updates. This is the GPT-anticipated "Different-basin result" decision-rule entry, except the basin itself does not stabilize on a non-left action; it cycles.
+
+3. **Value head with 64-unit MLP underfits inside 10k timesteps.** Explained variance never crosses zero; advantage std stays bounded in [2.21, 6.35] (K0-10k went up to 18.45). The mechanical explanation for finding 2 is that PPO never receives structured-enough advantage to commit beyond the rollout-level scale. The K0-10k wedge required the value head to learn structured returns first (EV crossed 0.10 at upd 9, after which commitment sharpened). K1 disables that pre-condition by shrinking the value MLP head.
+
+4. **Per-step deterministic argmax fraction = 1.0 every update is a known property of CnnPolicy on this env, not specific to K0 or K1.** It means within any 256-step rollout under any tested architecture, the policy at this scale and budget always picks one action for all observations. The wedge / non-wedge distinction lives entirely in (a) whether that single action stabilizes across updates and (b) whether the supporting probability margin sharpens. K0-10k: yes to both. K1: no to both.
+
+5. **K1 does not satisfy the "Strong K1 mechanism win" decision rule from the prior planning turn.** GPT's strong-win criterion was "deterministic argmax does not lock by update 9, entropy does not cross < 0.20 by update 25, and final policy is not constant-action across rollout obs." K1 passes 1 and 2 but fails 3 (the final policy at upd 40 is still constant-action across rollout obs, just `right` instead of `left` and oscillating across updates). The honest categorization is GPT's "Weak win" plus "Different-basin result" rolled together: architecture attacks the mechanism, but not by enabling observation-conditioned learning.
+
+## 22. K1 verdict and rationale
+
+Verdict: **K-C** (probe-classifier output).
+
+Editorial verdict for the K-series ladder: **mechanism intervention successful but inconclusive about competence.** K1 demonstrates that the K0-10k wedge is not architecture-invariant; the shared MLP head is part of the mechanism. K1 does **not** demonstrate that the K1 architecture can learn to dodge given more training, because the value head shows no learning signal at 10k timesteps. Two follow-on slices are honest:
+
+- **K1-extended**: rerun K1 with `total_timesteps=30000` or `50000` to see whether the value head ever learns and whether commitment then forms in a non-wedge basin.
+- **K2 train-seed asymmetry**: rerun K0-10k baseline (shared head, same recipe) at train_seed=1, 3, 4 to test whether K0-10k's `left` wedge was seed-specific. If the wedge appears at every seed under shared-head, the wedge is architectural. If it only appears at seed 2, the wedge is seed-specific and K1's basin-shifting may be a less interesting result than the K0-10k narrative implies.
+
+K2 is structurally more informative because it disambiguates "architecture matters" from "seed matters" before further architecture changes are tested. K1-extended is cheaper but only confirms or rejects the K1-specific question without resolving the K0-10k seed asymmetry question.
+
+## 23. Demo-0 connection
+
+Demo-0 (this session, prior turn) ran the K0-10k trained `model.zip` (Phase E seed=2, entropy recipe) in deployment with `deterministic=True` at eval seed 1008 for 1800 steps. Behavior: 100% `left`. Total reward 1800.0, truncated by timeout. The deployment-time wedge matches what K0-10k diagnosed at training time: the policy commits to `left` across observations and never reconsiders.
+
+K1 attacks that deployment-time wedge at the source. If K1-extended or K2 produces a non-wedge converged policy and that policy is then loaded by `tools/demo0_visible_play.py` against eval seed 1008, the Demo-0 video would show a non-pinned paddle. That is the chain of evidence from mechanism work back to the watchable artifact. K1 by itself does not produce that policy because EV never crosses zero; no `model.zip` is written by the entropy probe regardless.
+
+## 24. K1 reproduction recipe
+
+From `C:\Projects\Sight` in cmd.exe:
+
+```
+set SIGHT_GODOT_EXE=C:\Users\maste\AppData\Local\Microsoft\WinGet\Packages\GodotEngine.GodotEngine_Microsoft.Winget.Source_8wekyb3d8bbwe\Godot_v4.6.2-stable_win64_console.exe
+
+"C:\Users\maste\AppData\Local\Python\bin\python.exe" -u tools\h5_training_entropy_probe.py ^
+  --config configs\rl\signal_dodge_ppo_h5_pixel_entropy_k1_netarch.yaml ^
+  --seed 2 ^
+  --total-timesteps 10000 ^
+  --out-dir runs\phase_k ^
+  --label entropy_probe_seed2_10k_k1_netarch
+```
+
+Wall: 311.5 s on StrongerJr. Tool-call budget: exceeds the inline MCP 4-minute timeout. Use the bat-with-sentinel wrapper pattern (template at `C:\Users\maste\AppData\Local\Temp\sight_k1\run_k1.bat` from this session) rather than `interact_with_process` inline.
+
+Config differences vs the unmodified entropy YAML (`configs\rl\signal_dodge_ppo_h5_pixel_entropy.yaml`):
+
+- `run.name` changes to `signal_dodge_ppo_h5_pixel_entropy_k1_netarch`.
+- `algo.hyperparams` adds `policy_kwargs: {net_arch: {pi: [64], vf: [64]}}`.
+- No other field differs.
+
+`per_update_digest` schema now includes (`tools/h5_training_entropy_probe.py` digest patch this session): `det_argmax_pre`, `det_argmax_fraction_pre`, `det_argmax_post`, `det_argmax_fraction_post`, `policy_prob_left_post`, `policy_prob_stay_post`, `policy_prob_right_post`. These fields were always recorded in the full NDJSON records under `pre_update.policy_state` and `post_update.policy_state`; the patch only hoists them into the per-update digest so analysis tooling does not need to walk the full NDJSON.

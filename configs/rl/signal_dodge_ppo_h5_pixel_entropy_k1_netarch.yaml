@@ -1,0 +1,62 @@
+run:
+  phase: H5
+  name: signal_dodge_ppo_h5_pixel_entropy_k1_netarch
+  seed: 0
+  out_dir: runs/rl
+
+env:
+  id: godot:signal-dodge-v0
+  n_envs: 1
+  godot_executable: null
+  project_path: games/signal-dodge
+  max_steps: 1800
+  headless: false
+  observation_mode: pixel
+  pixel_width: 84
+  pixel_height: 84
+  pixel_channels: 1
+
+algo:
+  framework: stable-baselines3
+  name: PPO
+  policy: CnnPolicy
+  device: cpu
+  # Phase K K1 architecture mechanism probe. Identical to
+  # configs/rl/signal_dodge_ppo_h5_pixel_entropy.yaml hyperparams except for
+  # policy_kwargs.net_arch, which adds an explicit pi/vf head separation
+  # on top of the shared NatureCNN feature extractor. The K0-10k probe
+  # localized the wedge mechanism to steady PPO commitment with deterministic
+  # argmax locking to `left` at update 9 / ts=2304 (see
+  # docs/h5-phase-k-training-entropy-probe-evidence.md sections 11-17).
+  # K1 directly tests whether decoupled policy and value MLP latent capacity
+  # delays or breaks the lock. It is a mechanism probe, not acceptance
+  # evidence; K2 train-seed asymmetry is the structurally next slice if
+  # K1 does not move the mechanism.
+  hyperparams:
+    n_steps: 256
+    batch_size: 64
+    n_epochs: 4
+    ent_coef: 0.01
+    learning_rate: 0.0003
+    gamma: 0.99
+    gae_lambda: 0.95
+    clip_range: 0.2
+    policy_kwargs:
+      net_arch:
+        pi: [64]
+        vf: [64]
+
+train:
+  total_timesteps: 10000
+
+eval:
+  eval_freq: 2048
+  n_eval_episodes: 1
+  deterministic: true
+
+logging:
+  format: ndjson
+
+checkpoint:
+  enabled: true
+  filename: model.zip
