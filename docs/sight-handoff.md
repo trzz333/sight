@@ -6,7 +6,7 @@ Canonical handoff document. Updated at the end of every session by whoever execu
 
 **Phase:** H5 amended; Phase K K0 training-time entropy-collapse probe complete at both 2048 and 10000 timesteps. K0-2048 verdict K-C (pilot), K0-10k verdict K-A (late). K-B detector tightened to AND semantics before the 10k rerun.
 
-**Last commit:** `<PENDING>` Phase K K0-10k evidence + K-B AND patch (see commit message body).
+**Last commit:** `c5d993d` Phase K K0 extension: 10000-timestep entropy probe + K-B AND patch.
 
 **Current task:** K0-10k ran one instrumented 10000-timestep training session (train_seed=2, `configs/rl/signal_dodge_ppo_h5_pixel_entropy.yaml`, 40 PPO updates, 312.0 s wall) via the patched `tools/h5_training_entropy_probe.py`. Collapse threshold crosses at update 25 (ts=6400): `H_post=0.1776` (entropy < 0.20), `rollout_action_stats.top_action_fraction=0.973` (>= 0.95). Raw margin never crosses 4.0 (peak 3.76 at upd 26 pre). Evidence at `docs/h5-phase-k-training-entropy-probe-evidence.md` sections 11-17. NDJSON sha256 `5a8d7a4d…`, summary sha256 `bd420e0f…` (both gitignored under `runs/phase_k/`).
 
