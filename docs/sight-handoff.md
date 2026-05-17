@@ -6,7 +6,7 @@ Canonical handoff document. Updated at the end of every session by whoever execu
 
 **Phase:** Phase K K2 baseline shared-head train-seed asymmetry probe complete (verdict K2-A, four-seed shared-head wedge confirmed). GPT scoping refined this turn: next slice is a value-head capacity sweep gated on a fixed observation-conditioning panel and a non-constant-action success contract. K1-extended remains parked. Phase nomenclature unchanged (H5 amended).
 
-**Last commit:** `d5db70e` docs: refine K-series next-action with observation-conditioned success contract.
+**Last commit:** `05896bd` docs: refine K-series next-action with observation-conditioned success contract.
 
 **Current task:** K2 evidence and verdict are recorded at `docs/h5-phase-k-training-entropy-probe-evidence.md` sections 25-31 and committed at `fa13801`. GPT has now refined the next-slice contract: failure is redefined as any final policy whose deterministic argmax is one action for all sampled observations (all-left, all-stay, and all-right are equivalent failures); entropy collapse is no longer the central success metric; the gating metric is whether action and logit responses vary with the input. Two prerequisites for the next architectural slice are queued here.
 
