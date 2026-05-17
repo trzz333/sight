@@ -6,7 +6,7 @@ Canonical handoff document. Updated at the end of every session by whoever execu
 
 **Phase:** Phase K K1 architecture mechanism probe complete. K1 verdict K-C: the K0-10k wedge does not reproduce under `policy_kwargs.net_arch = dict(pi=[64], vf=[64])`. Mechanism intervention successful but inconclusive about competence (value head shows no learning signal inside the 10k budget). Phase nomenclature unchanged (H5 amended).
 
-**Last commit:** _to be backfilled by chore commit_
+**Last commit:** `336f6da` Phase K K1 architecture mechanism probe: net_arch pi/vf=[64]/[64], verdict K-C.
 
 **Current task:** K1 architecture probe ran one instrumented 10000-timestep training session (train_seed=2, `configs/rl/signal_dodge_ppo_h5_pixel_entropy_k1_netarch.yaml`, 40 PPO updates, 311.5 s wall) via the digest-patched `tools/h5_training_entropy_probe.py`. No collapse threshold crossed: entropy floor 0.96, sampled top-action fraction ceiling 0.547, raw margin ceiling 0.66. Deterministic argmax oscillated across updates rather than locking: `left` upd 1-7, `right` upd 8-19, `left` upd 25-38, `right` upd 39-40. EV never crossed zero. K1 demonstrates the K0-10k wedge is architecture-dependent; it does not demonstrate K1 produces a learning policy. Evidence appended at `docs/h5-phase-k-training-entropy-probe-evidence.md` sections 18-24. Artifact sha256: ndjson `5e8cb430…`, summary `48f24a71…` (gitignored under `runs/phase_k/`). Tool patch: `tools/h5_training_entropy_probe.py` `per_update_digest` now surfaces `det_argmax_pre`, `det_argmax_fraction_pre`, `det_argmax_post`, `det_argmax_fraction_post`, `policy_prob_left_post`, `policy_prob_stay_post`, `policy_prob_right_post`. Sibling config: `configs/rl/signal_dodge_ppo_h5_pixel_entropy_k1_netarch.yaml`.
 
