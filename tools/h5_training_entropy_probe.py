@@ -573,7 +573,13 @@ class InstrumentedPPO(PPO):
     summarizing that PPO update.
     """
 
-    def __init__(self, *args: Any, probe_records: list | None = None, **kwargs: Any) -> None:
+    def __init__(
+        self,
+        *args: Any,
+        probe_records: list | None = None,
+        value_bias_init_mode: str = "none",
+        **kwargs: Any,
+    ) -> None:
         super().__init__(*args, **kwargs)
         self.probe_records: list = probe_records if probe_records is not None else []
         self._probe_update_idx: int = 0
@@ -583,6 +589,18 @@ class InstrumentedPPO(PPO):
         # tensor MUST be on the same device as the policy (driver responsibility).
         self.fixed_panel_obs_tensor: th.Tensor | None = None
         self.fixed_panel_metadata: dict[str, Any] | None = None
+        # K3.4 scalar value-head bias init. Applied exactly once at update 1
+        # when mode == "first-rollout-mean": mutates policy.value_net.bias to
+        # mean(rollout_buffer.returns) AFTER returns are computed by
+        # collect_rollouts and BEFORE pre-snapshots and the first optimizer
+        # step. Only the scalar head bias is mutated; value_net.weight and
+        # mlp_extractor.value_net are left untouched. Diagnostic block lives
+        # in the update record for idx 1; pre_rollout_after_value_bias_init
+        # captures the live policy.predict_values fit after the mutation but
+        # before the first optimizer step.
+        self.value_bias_init_mode: str = value_bias_init_mode
+        self._value_bias_init_record: dict[str, Any] | None = None
+        self._pre_value_fit_after_bias_init: dict[str, Any] | None = None
 
     def train(self) -> None:
         # --- Pre-update snapshots ---------------------------------------------------
@@ -599,6 +617,63 @@ class InstrumentedPPO(PPO):
         # SB3 stores observations as (n_steps, n_envs, *obs_shape); reshape to
         # (n_steps*n_envs, *obs_shape) for batched policy evaluation.
         rb_obs_flat = rb_obs.reshape((-1,) + rb_obs.shape[2:])
+
+        # K3.4 first-rollout scalar value-head bias init. Applied exactly once
+        # at update 1, AFTER returns were computed by collect_rollouts and
+        # BEFORE pre_action_net / pre_policy_state / pre_fixed_panel_state and
+        # the first optimizer step. Mutates policy.value_net.bias only;
+        # value_net.weight and mlp_extractor.value_net are untouched. The
+        # diagnostic block is stored on self for later attach to the update-1
+        # record. The post-bias predict_values fit is captured immediately
+        # after the mutation as pre_rollout_after_value_bias_init.
+        if (
+            self.value_bias_init_mode == "first-rollout-mean"
+            and self._probe_update_idx == 0
+        ):
+            rb_returns_first = (
+                np.asarray(rollout_buffer.returns).reshape(-1).astype(np.float64)
+            )
+            returns_std_first = (
+                float(rb_returns_first.std()) if rb_returns_first.size else 0.0
+            )
+            old_bias_val = float(
+                self.policy.value_net.bias.detach().cpu().item()
+            )
+            new_bias_val = float(rb_returns_first.mean())
+            with th.no_grad():
+                self.policy.value_net.bias.fill_(new_bias_val)
+            self._value_bias_init_record = {
+                "mode": "first-rollout-mean",
+                "applied": True,
+                "applied_before_pre_snapshot": True,
+                "update_idx": 1,
+                "old_bias": old_bias_val,
+                "new_bias": new_bias_val,
+                "rollout_returns_mean": float(rb_returns_first.mean()),
+                "rollout_returns_std": returns_std_first,
+            }
+            with th.no_grad():
+                post_bias_init_values_t = self.policy.predict_values(
+                    rb_obs_flat
+                ).flatten()
+            post_bias_init_values_np = (
+                post_bias_init_values_t.detach()
+                .cpu()
+                .numpy()
+                .astype(np.float64)
+            )
+            self._pre_value_fit_after_bias_init = compute_value_fit_stats(
+                post_bias_init_values_np,
+                rb_returns_first,
+                returns_std_first,
+            )
+            print(
+                f"[h5_training_entropy_probe] K3.4 value-bias-init: "
+                f"old_bias={old_bias_val:.6f} new_bias={new_bias_val:.6f} "
+                f"rollout_returns_mean={new_bias_val:.6f} "
+                f"std={returns_std_first:.6f}",
+                flush=True,
+            )
 
         pre_action_net = snapshot_action_net(self.policy)
         pre_policy_state = snapshot_policy_state(self.policy, rb_obs_flat)
@@ -898,8 +973,23 @@ class InstrumentedPPO(PPO):
                 ),
                 "returns_std": returns_std_for_ratio,
                 "pre_rollout": pre_value_fit,
+                # K3.4: live policy.predict_values fit AFTER scalar value-head
+                # bias init and BEFORE the first optimizer step. None on every
+                # update for non-bias-init runs, and None on updates >= 2 for
+                # bias-init runs since the mutation fires exactly once.
+                "pre_rollout_after_value_bias_init": (
+                    self._pre_value_fit_after_bias_init
+                    if update_idx == 1 else None
+                ),
                 "post_rollout": post_value_fit,
             },
+            # K3.4 scalar value-head bias init diagnostic block. None on every
+            # update except the one where bias-init was applied (idx 1). For
+            # --value-bias-init none the field is None on every update.
+            "value_bias_init": (
+                self._value_bias_init_record
+                if update_idx == 1 else None
+            ),
             "max_grad_norm_clip": float(self.max_grad_norm),
             "explained_variance": explained_var,
             "_record_ts_utc": time.strftime(
@@ -1174,6 +1264,21 @@ def build_arg_parser() -> argparse.ArgumentParser:
             "model construction."
         ),
     )
+    p.add_argument(
+        "--value-bias-init", default="none",
+        choices=("none", "first-rollout-mean"),
+        help=(
+            "K3.4 value-shock intervention: scalar value-head bias init mode. "
+            "'first-rollout-mean' sets policy.value_net.bias to "
+            "mean(rollout_buffer.returns) of the first rollout, applied "
+            "exactly once at update 1 AFTER returns are computed by "
+            "collect_rollouts and BEFORE pre-snapshots and the first "
+            "optimizer step. Eliminates the initial scalar-value-target "
+            "gap that K3.2 evidence implicates in latent_vf collapse by "
+            "update 3. Only the scalar head bias is mutated; "
+            "value_net.weight and mlp_extractor.value_net are untouched."
+        ),
+    )
     return p
 
 
@@ -1271,6 +1376,14 @@ def main(argv: list[str] | None = None) -> int:
             flush=True,
         )
 
+    # K3.4 value-shock intervention: log the bias-init mode before construction.
+    if args.value_bias_init != "none":
+        print(
+            f"[h5_training_entropy_probe] value-bias-init mode: "
+            f"{args.value_bias_init} (mutation fires once at update 1)",
+            flush=True,
+        )
+
     probe_records: list[dict[str, Any]] = []
     model = InstrumentedPPO(
         policy=policy,
@@ -1278,6 +1391,7 @@ def main(argv: list[str] | None = None) -> int:
         seed=train_seed,
         device=device,
         probe_records=probe_records,
+        value_bias_init_mode=str(args.value_bias_init),
         **hyperparams,
     )
 
@@ -1342,6 +1456,14 @@ def main(argv: list[str] | None = None) -> int:
         ),
         "vf_coef": float(getattr(model, "vf_coef", 0.5)),
         "max_grad_norm": float(getattr(model, "max_grad_norm", 0.5)),
+        # K3.4 scalar value-head bias init: mode requested via CLI plus a
+        # hard-state flag for whether the mutation actually fired during
+        # training. value_bias_init_applied is True iff the InstrumentedPPO
+        # recorded a non-None _value_bias_init_record after model.learn().
+        "value_bias_init_mode": str(getattr(model, "value_bias_init_mode", "none")),
+        "value_bias_init_applied": bool(
+            getattr(model, "_value_bias_init_record", None) is not None
+        ),
         "policy_kwargs": dict(hyperparams.get("policy_kwargs") or {}),
         "fixed_panel_metadata": fixed_panel_metadata,
         "collapse_thresholds": {
