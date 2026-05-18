@@ -114,8 +114,9 @@ def snapshot_policy_state(
     """
     with th.no_grad():
         features = policy.extract_features(obs_tensor)
-        latent_pi, _latent_vf = policy.mlp_extractor(features)
+        latent_pi, latent_vf = policy.mlp_extractor(features)
         raw_logits = policy.action_net(latent_pi)
+        values = policy.value_net(latent_vf)
         probs = th.softmax(raw_logits, dim=-1)
         # Per-action probability fractions across the obs batch (mean of probs).
         mean_probs = probs.mean(dim=0).detach().cpu().numpy().astype(np.float64)
@@ -135,6 +136,58 @@ def snapshot_policy_state(
     # Argmax counts/fractions across the obs batch.
     argmax_counts = {i: int(np.sum(argmax_per_step == i)) for i in range(3)}
     argmax_frac = {ACTION_NAMES[i]: float(argmax_counts[i] / n) if n else 0.0 for i in range(3)}
+    # K3.1 feature-chain diagnostic: cross-batch diversity stats for raw
+    # obs, CNN features, latent_pi, latent_vf, action logits, and value
+    # predictions on the same obs tensor. Identifies where (if anywhere)
+    # variance collapses through the actor-critic network. Diversity
+    # metric: per-dim std across the batch, then summary stats over dims.
+    # Cheap (one extra forward through value_net plus numpy ops).
+    raw_obs_np = obs_tensor.detach().to(th.float64).reshape(obs_tensor.shape[0], -1).cpu().numpy()
+    features_np = features.detach().cpu().numpy().astype(np.float64)
+    latent_pi_np = latent_pi.detach().cpu().numpy().astype(np.float64)
+    latent_vf_np = latent_vf.detach().cpu().numpy().astype(np.float64)
+    values_np = values.detach().cpu().numpy().astype(np.float64).flatten()
+    fcd_eps = 1e-6
+
+    def _dim_std_stats(a: "np.ndarray") -> dict[str, Any]:
+        if a.size == 0 or a.shape[0] < 2 or a.ndim < 2:
+            return {
+                "total_dims": int(a.shape[1]) if a.ndim >= 2 else 0,
+                "dim_std_mean": 0.0,
+                "dim_std_min": 0.0,
+                "dim_std_max": 0.0,
+                "dim_std_median": 0.0,
+                "n_dims_above_eps": 0,
+                "eps": fcd_eps,
+            }
+        per_dim_std = np.std(a, axis=0).astype(np.float64)
+        return {
+            "total_dims": int(per_dim_std.size),
+            "dim_std_mean": float(np.mean(per_dim_std)),
+            "dim_std_min": float(np.min(per_dim_std)),
+            "dim_std_max": float(np.max(per_dim_std)),
+            "dim_std_median": float(np.median(per_dim_std)),
+            "n_dims_above_eps": int(np.sum(per_dim_std > fcd_eps)),
+            "eps": fcd_eps,
+        }
+
+    feature_chain_diversity = {
+        "share_features_extractor": bool(
+            getattr(policy, "share_features_extractor", True)
+        ),
+        "raw_obs": _dim_std_stats(raw_obs_np),
+        "cnn_features": _dim_std_stats(features_np),
+        "latent_pi": _dim_std_stats(latent_pi_np),
+        "latent_vf": _dim_std_stats(latent_vf_np),
+        "action_logits": _dim_std_stats(logits_np),
+        "value_predictions": {
+            "n": int(values_np.size),
+            "mean": float(np.mean(values_np)) if values_np.size else 0.0,
+            "std": float(np.std(values_np)) if values_np.size else 0.0,
+            "min": float(np.min(values_np)) if values_np.size else 0.0,
+            "max": float(np.max(values_np)) if values_np.size else 0.0,
+        },
+    }
     return {
         "n": n,
         "entropy_mean": float(np.mean(entropy_per_step)) if n else 0.0,
@@ -169,6 +222,7 @@ def snapshot_policy_state(
                 ACTION_NAMES[i]: {"min": 0.0, "max": 0.0} for i in range(3)
             }
         ),
+        "feature_chain_diversity": feature_chain_diversity,
     }
 
 
