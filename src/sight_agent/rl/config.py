@@ -66,7 +66,13 @@ def apply_cli_overrides(cfg: dict[str, Any], overrides: dict[str, Any]) -> dict[
     """Apply CLI overrides into a config dict (returns a shallow-copied result).
 
     Recognized override keys: seed, total_timesteps, eval_freq, n_eval_episodes,
-    run_id, out_dir. None values are ignored.
+    run_id, out_dir, reward_scale_divisor. None values are ignored.
+
+    K3.5c threads ``reward_scale_divisor`` through the CLI surface so the
+    production trainer can apply the K3.5-validated ``FixedRewardScaleVecEnv``
+    wrapper to the train env without a config edit. Stored under
+    ``train.reward_scale_divisor``; the trainer reads it after override merge
+    and wraps the train VecEnv only.
     """
     out = {k: dict(v) if isinstance(v, dict) else v for k, v in cfg.items()}
     seed = overrides.get("seed")
@@ -87,4 +93,7 @@ def apply_cli_overrides(cfg: dict[str, Any], overrides: dict[str, Any]) -> dict[
     out_dir = overrides.get("out_dir")
     if out_dir is not None:
         out["run"]["out_dir"] = str(out_dir)
+    reward_scale_divisor = overrides.get("reward_scale_divisor")
+    if reward_scale_divisor is not None:
+        out["train"]["reward_scale_divisor"] = float(reward_scale_divisor)
     return out

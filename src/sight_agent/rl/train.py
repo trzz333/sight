@@ -46,6 +46,7 @@ from .config import apply_cli_overrides, load_config
 from .factories import make_algo, make_env, smoke_check_env
 from .godot_config import is_godot_env_id, resolve_godot_kwargs
 from .ndjson_logger import NDJSONLogger, get_short_git_commit
+from .reward_scaling import maybe_wrap_train_env
 
 
 def _set_global_seeds(seed: int) -> None:
@@ -85,6 +86,18 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--n-eval-episodes", type=int, default=None, dest="n_eval_episodes")
     parser.add_argument("--run-id", type=str, default=None, dest="run_id")
     parser.add_argument("--out-dir", type=str, default=None, dest="out_dir")
+    parser.add_argument(
+        "--reward-scale-divisor",
+        type=float,
+        default=None,
+        dest="reward_scale_divisor",
+        help=(
+            "K3.5 fixed reward-magnitude divisor applied to the train VecEnv "
+            "only. > 0. Omit or pass 1.0 for no scaling. Recorded in "
+            "run_start and summary.json as reward_scale_divisor + "
+            "reward_scale_applied."
+        ),
+    )
     return parser
 
 
@@ -99,6 +112,7 @@ def main(argv: list[str] | None = None) -> int:
         "n_eval_episodes": args.n_eval_episodes,
         "run_id": args.run_id,
         "out_dir": args.out_dir,
+        "reward_scale_divisor": args.reward_scale_divisor,
     }
     cfg = apply_cli_overrides(cfg, overrides)
     return run(cfg, config_path=str(args.config))
@@ -237,6 +251,21 @@ def run(cfg: dict[str, Any], config_path: str = "<inline>") -> int:
     train_env = _build_train_env(cfg, artifacts)
     eval_env = _build_eval_env(cfg, artifacts)
 
+    # K3.5c: optional fixed reward-magnitude scaler. Applied to the
+    # **training** VecEnv only. The in-training eval env and any external
+    # eval surface (sight_agent.rl.h5_baseline_cli) remain unscaled so
+    # eval-time reward metrics stay comparable to the canonical Phase D
+    # baseline. ``None`` and ``1.0`` are explicit no-ops.
+    reward_scale_divisor_cfg = cfg["train"].get("reward_scale_divisor")
+    train_env, reward_scale_applied = maybe_wrap_train_env(
+        train_env, reward_scale_divisor_cfg
+    )
+    reward_scale_divisor_recorded: float = (
+        float(reward_scale_divisor_cfg)
+        if reward_scale_divisor_cfg is not None
+        else 1.0
+    )
+
     model = make_algo(
         framework=framework,
         name=algo_name,
@@ -272,6 +301,8 @@ def run(cfg: dict[str, Any], config_path: str = "<inline>") -> int:
         env_smoke={"obs_shape": list(obs_shape), "action_n": action_n},
         effective_hyperparams=effective,
         artifact_paths=artifact_paths_for_events,
+        reward_scale_divisor=reward_scale_divisor_recorded,
+        reward_scale_applied=reward_scale_applied,
         provenance_note=(
             "Library defaults are runtime-introspected from installed packages; "
             "no web-verified claims."
@@ -351,6 +382,8 @@ def run(cfg: dict[str, Any], config_path: str = "<inline>") -> int:
         "versions": versions,
         "effective_hyperparams": effective,
         "artifact_paths": summary_artifact_paths,
+        "reward_scale_divisor": reward_scale_divisor_recorded,
+        "reward_scale_applied": reward_scale_applied,
         # Backward-compat fields used by H1 packet/tests.
         "events_ndjson": str(artifacts.events_path),
         "status": status,
