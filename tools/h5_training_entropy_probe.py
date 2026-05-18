@@ -58,6 +58,7 @@ if str(_TOOLS) not in sys.path:
 
 from stable_baselines3 import PPO  # noqa: E402
 from stable_baselines3.common.utils import explained_variance  # noqa: E402
+from stable_baselines3.common.vec_env import VecEnvWrapper  # noqa: E402
 
 from sight_agent.rl.config import load_config  # noqa: E402
 from sight_agent.rl.factories import make_env  # noqa: E402
@@ -558,6 +559,40 @@ def compute_total_grad_norm(policy: Any) -> float:
             continue
         total_sq += float(p.grad.detach().pow(2).sum().item())
     return float(total_sq ** 0.5)
+
+
+class FixedRewardScaleVecEnv(VecEnvWrapper):
+    """K3.5 fixed reward-magnitude scaler at the VecEnv layer.
+
+    Divides per-step env reward by a fixed scalar before SB3 sees it, so
+    returns/advantages/value targets are computed in the scaled stream
+    consistently. Applied only to the training env, NOT to the fixed
+    observation-conditioning panel env (panel reward is irrelevant to
+    observation conditioning and wrapping it risks contaminating a pure
+    observation probe).
+
+    K3.5 contract: tests magnitude-vs-drift-ratio as load-bearing mechanism.
+    Fixed division preserves relative drift ratio of returns across updates
+    (since each per-step reward is scaled by the same scalar), so if both
+    /30 and /100 fail similarly the absolute-magnitude hypothesis is
+    falsified and K3.6 reward-shape change is the necessary escalation.
+    """
+
+    def __init__(self, venv: Any, divisor: float) -> None:
+        if divisor <= 0.0:
+            raise ValueError("--reward-scale-divisor must be > 0")
+        super().__init__(venv)
+        self.reward_scale_divisor = float(divisor)
+
+    def reset(self) -> Any:
+        return self.venv.reset()
+
+    def step_wait(self) -> Any:
+        obs, rewards, dones, infos = self.venv.step_wait()
+        scaled_rewards = (
+            np.asarray(rewards, dtype=np.float32) / self.reward_scale_divisor
+        )
+        return obs, scaled_rewards, dones, infos
 
 
 class InstrumentedPPO(PPO):
@@ -1279,6 +1314,18 @@ def build_arg_parser() -> argparse.ArgumentParser:
             "value_net.weight and mlp_extractor.value_net are untouched."
         ),
     )
+    p.add_argument(
+        "--reward-scale-divisor", default=1.0, type=float,
+        help=(
+            "K3.5 fixed reward-magnitude scaler. When > 1.0 (and != 1.0), "
+            "wraps the training VecEnv in FixedRewardScaleVecEnv which "
+            "divides per-step env reward by this scalar before SB3 sees "
+            "it. Tests magnitude-vs-drift-ratio as the load-bearing "
+            "mechanism for the K3.2 update-1 value shock under Adam. The "
+            "fixed observation-conditioning panel env is NEVER wrapped "
+            "(its reward is irrelevant). Must be > 0; 1.0 is a no-op."
+        ),
+    )
     return p
 
 
@@ -1342,6 +1389,19 @@ def main(argv: list[str] | None = None) -> int:
         env = make_env(
             env_id, n_envs=int(cfg["env"]["n_envs"]),
             seed=train_seed, mode="train",
+        )
+
+    # K3.5 fixed reward-magnitude scaler: wrap only the training env. Panel
+    # env is NEVER wrapped (its reward is irrelevant to observation
+    # conditioning). 1.0 is a no-op; any value <= 0 raises in the wrapper.
+    reward_scale_applied = False
+    if args.reward_scale_divisor != 1.0:
+        env = FixedRewardScaleVecEnv(env, args.reward_scale_divisor)
+        reward_scale_applied = True
+        print(
+            f"[h5_training_entropy_probe] K3.5 reward-scale wrapper: "
+            f"divisor={float(args.reward_scale_divisor)} applied to train env only",
+            flush=True,
         )
 
     algo_cfg = cfg["algo"]
@@ -1464,6 +1524,8 @@ def main(argv: list[str] | None = None) -> int:
         "value_bias_init_applied": bool(
             getattr(model, "_value_bias_init_record", None) is not None
         ),
+        "reward_scale_divisor": float(args.reward_scale_divisor),
+        "reward_scale_applied": bool(reward_scale_applied),
         "policy_kwargs": dict(hyperparams.get("policy_kwargs") or {}),
         "fixed_panel_metadata": fixed_panel_metadata,
         "collapse_thresholds": {
