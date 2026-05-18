@@ -486,6 +486,70 @@ def compute_module_grad_norm(module: Any) -> float:
     return float(total_sq ** 0.5)
 
 
+def compute_module_grad_norm_weights_only(module: Any) -> float:
+    """L2 grad norm over weight tensors only (rank>=2), excluding biases.
+
+    K3.3: isolates whether the input-mapping weights of a module are
+    receiving signal versus only the biases drifting.
+    """
+    total_sq = 0.0
+    for p in module.parameters():
+        if p.grad is None:
+            continue
+        if p.dim() < 2:
+            continue
+        total_sq += float(p.grad.detach().pow(2).sum().item())
+    return float(total_sq ** 0.5)
+
+
+def compute_value_fit_stats(
+    values: "np.ndarray",
+    returns: "np.ndarray",
+    returns_std_for_ratio: float | None = None,
+) -> dict[str, Any]:
+    """K3.3: value-fit summary against rollout returns.
+
+    Reports model_mse = mean((returns - values)^2), constant_baseline_mse =
+    var(returns), their ratio, EV, and the value distribution summary.
+    Used twice per update (pre-update and post-update rollout-obs forward).
+    """
+    v = np.asarray(values).reshape(-1).astype(np.float64)
+    r = np.asarray(returns).reshape(-1).astype(np.float64)
+    n = int(v.size)
+    if n == 0:
+        return {
+            "n": 0,
+            "value_pred_mean": 0.0,
+            "value_pred_std": 0.0,
+            "value_pred_min": 0.0,
+            "value_pred_max": 0.0,
+            "model_mse": 0.0,
+            "constant_baseline_mse": 0.0,
+            "model_to_constant_mse_ratio": None,
+            "explained_variance": 0.0,
+        }
+    err = r - v
+    model_mse = float(np.mean(err * err))
+    if returns_std_for_ratio is None:
+        const_mse = float(np.var(r))
+    else:
+        const_mse = float(returns_std_for_ratio) ** 2
+    ratio = None
+    if const_mse > 1e-12:
+        ratio = float(model_mse / const_mse)
+    return {
+        "n": n,
+        "value_pred_mean": float(np.mean(v)),
+        "value_pred_std": float(np.std(v)),
+        "value_pred_min": float(np.min(v)),
+        "value_pred_max": float(np.max(v)),
+        "model_mse": model_mse,
+        "constant_baseline_mse": const_mse,
+        "model_to_constant_mse_ratio": ratio,
+        "explained_variance": float(explained_variance(v, r)),
+    }
+
+
 def compute_total_grad_norm(policy: Any) -> float:
     """L2 norm of the full policy parameter gradient vector."""
     total_sq = 0.0
@@ -564,6 +628,14 @@ class InstrumentedPPO(PPO):
         mlp_grad_norms: list[float] = []
         action_grad_norms: list[float] = []
         value_grad_norms: list[float] = []
+        # K3.3: per-submodule MLP grad norms to isolate mlp_extractor.policy_net
+        # vs mlp_extractor.value_net (the existing mlp_extractor_mean mixes both
+        # branches, and value_net_mean is the final scalar head not the MLP
+        # submodule). The weights-only variant separates input-mapping signal
+        # from bias drift.
+        mlp_policy_net_grad_norms: list[float] = []
+        mlp_value_net_grad_norms: list[float] = []
+        mlp_value_net_weights_grad_norms: list[float] = []
 
         continue_training = True
         n_epochs_done = 0
@@ -653,6 +725,18 @@ class InstrumentedPPO(PPO):
                 value_grad_norms.append(
                     compute_module_grad_norm(self.policy.value_net)
                 )
+                # K3.3: per-MLP-branch grad norms.
+                mlp_policy_net_grad_norms.append(
+                    compute_module_grad_norm(self.policy.mlp_extractor.policy_net)
+                )
+                mlp_value_net_grad_norms.append(
+                    compute_module_grad_norm(self.policy.mlp_extractor.value_net)
+                )
+                mlp_value_net_weights_grad_norms.append(
+                    compute_module_grad_norm_weights_only(
+                        self.policy.mlp_extractor.value_net
+                    )
+                )
                 th.nn.utils.clip_grad_norm_(
                     self.policy.parameters(), self.max_grad_norm
                 )
@@ -680,6 +764,26 @@ class InstrumentedPPO(PPO):
                 self.rollout_buffer.values.flatten(),
                 self.rollout_buffer.returns.flatten(),
             )
+        )
+
+        # K3.3: pre/post-update value-fit on rollout obs.
+        # Pre-update uses rollout_buffer.values (the values stored during
+        # collect_rollouts). Post-update re-runs the policy on the same obs
+        # to measure whether the just-applied update moved value predictions
+        # toward returns. The constant_baseline_mse uses Var(returns) and is
+        # identical for pre and post (same returns), so it lives at the
+        # update level under value_fit.constant_baseline_mse.
+        rb_returns_np = np.asarray(self.rollout_buffer.returns).reshape(-1).astype(np.float64)
+        rb_values_np = np.asarray(self.rollout_buffer.values).reshape(-1).astype(np.float64)
+        returns_std_for_ratio = float(np.std(rb_returns_np)) if rb_returns_np.size else 0.0
+        with th.no_grad():
+            post_values_t = self.policy.predict_values(rb_obs_flat).flatten()
+        post_values_np = post_values_t.detach().cpu().numpy().astype(np.float64)
+        pre_value_fit = compute_value_fit_stats(
+            rb_values_np, rb_returns_np, returns_std_for_ratio
+        )
+        post_value_fit = compute_value_fit_stats(
+            post_values_np, rb_returns_np, returns_std_for_ratio
         )
         if self.logger is not None:
             self.logger.record(
@@ -772,9 +876,29 @@ class InstrumentedPPO(PPO):
                 "total_mean": float(np.mean(total_grad_norms)),
                 "total_max": float(np.max(total_grad_norms)),
                 "features_extractor_mean": float(np.mean(feats_grad_norms)),
+                "features_extractor_max": float(np.max(feats_grad_norms)),
                 "mlp_extractor_mean": float(np.mean(mlp_grad_norms)),
+                "mlp_extractor_max": float(np.max(mlp_grad_norms)),
                 "action_net_mean": float(np.mean(action_grad_norms)),
+                "action_net_max": float(np.max(action_grad_norms)),
                 "value_net_mean": float(np.mean(value_grad_norms)),
+                "value_net_max": float(np.max(value_grad_norms)),
+                "mlp_policy_net_mean": float(np.mean(mlp_policy_net_grad_norms)),
+                "mlp_policy_net_max": float(np.max(mlp_policy_net_grad_norms)),
+                "mlp_value_net_mean": float(np.mean(mlp_value_net_grad_norms)),
+                "mlp_value_net_max": float(np.max(mlp_value_net_grad_norms)),
+                "mlp_value_net_weights_mean": float(np.mean(mlp_value_net_weights_grad_norms)),
+                "mlp_value_net_weights_max": float(np.max(mlp_value_net_weights_grad_norms)),
+                "scalar_value_head_mean": float(np.mean(value_grad_norms)),
+                "scalar_value_head_max": float(np.max(value_grad_norms)),
+            },
+            "value_fit": {
+                "constant_baseline_mse": float(
+                    pre_value_fit["constant_baseline_mse"]
+                ),
+                "returns_std": returns_std_for_ratio,
+                "pre_rollout": pre_value_fit,
+                "post_rollout": post_value_fit,
             },
             "max_grad_norm_clip": float(self.max_grad_norm),
             "explained_variance": explained_var,
@@ -1040,6 +1164,16 @@ def build_arg_parser() -> argparse.ArgumentParser:
             "MUST build the panel."
         ),
     )
+    p.add_argument(
+        "--vf-coef", default=None, type=float,
+        help=(
+            "K3.3 value-shock intervention: override PPO vf_coef. SB3 default "
+            "is 0.5. Lower values (0.1, 0.05) reduce value-loss gradient "
+            "magnitude that K3.2 evidence implicates in latent_vf collapse "
+            "by update 3. When provided, sets hyperparams['vf_coef'] before "
+            "model construction."
+        ),
+    )
     return p
 
 
@@ -1125,6 +1259,15 @@ def main(argv: list[str] | None = None) -> int:
         print(
             f"[h5_training_entropy_probe] policy_kwargs.net_arch override: "
             f"pi={pi_layers} vf={vf_layers}",
+            flush=True,
+        )
+
+    # K3.3 value-shock intervention: apply CLI vf_coef override.
+    if args.vf_coef is not None:
+        hyperparams["vf_coef"] = float(args.vf_coef)
+        print(
+            f"[h5_training_entropy_probe] vf_coef override: "
+            f"{float(args.vf_coef)}",
             flush=True,
         )
 
