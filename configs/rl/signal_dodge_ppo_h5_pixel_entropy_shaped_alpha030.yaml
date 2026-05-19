@@ -1,0 +1,70 @@
+run:
+  phase: H5
+  # Distinct parent dir so shaped (Phase G) artifacts do not co-mingle
+  # with the Phase E entropy artifacts at the canonical name.
+  name: signal_dodge_ppo_h5_pixel_entropy_shaped_alpha030
+  seed: 0
+  out_dir: runs/rl
+
+env:
+  id: godot:signal-dodge-v0
+  n_envs: 1
+  godot_executable: null
+  project_path: games/signal-dodge
+  # Full episode budget. Phase G mirrors Phase E budget so paired
+  # comparisons against Phase E artifacts are like-for-like.
+  max_steps: 1800
+  # Pixel mode requires windowed Godot per docs/sight-h4-plan.md
+  # section 1: --headless dummy display server does not emit
+  # RenderingServer.frame_post_draw so viewport capture cannot run.
+  headless: false
+  observation_mode: pixel
+  pixel_width: 84
+  pixel_height: 84
+  pixel_channels: 1
+  # H5 amendment shaped variant. Initial constants per
+  # docs/h5-reward-amendment-proposal.md section 4 and the
+  # pre-training smoke evidence at
+  # docs/h5-reward-amendment-smoke-evidence.md. Authorized for the
+  # first 3-seed 10k shaped training run with per-rollout
+  # frac_active_threat_saturated reported as a training diagnostic;
+  # if trained-policy mean saturation exceeds 0.50 over a
+  # representative sample, revise safe_lateral_distance.
+  reward_shaping: threat_weighted_clearance
+  reward_shaping_alpha: 0.30
+  reward_shaping_lookahead_band: 270
+  reward_shaping_safe_lateral_distance: 180
+
+algo:
+  framework: stable-baselines3
+  name: PPO
+  policy: CnnPolicy
+  device: cpu
+  # Phase E entropy recipe held fixed so reward shape is the single
+  # independent variable. Mirrors signal_dodge_ppo_h5_pixel_entropy.yaml.
+  hyperparams:
+    n_steps: 256
+    batch_size: 64
+    n_epochs: 4
+    ent_coef: 0.01
+    learning_rate: 0.0003
+    gamma: 0.99
+    gae_lambda: 0.95
+    clip_range: 0.2
+
+train:
+  total_timesteps: 10000
+
+eval:
+  # H5 acceptance evidence comes from the explicit external eval CLI
+  # (sight_agent.rl.h5_baseline_cli), not from in-training eval.
+  eval_freq: 2048
+  n_eval_episodes: 1
+  deterministic: true
+
+logging:
+  format: ndjson
+
+checkpoint:
+  enabled: true
+  filename: model.zip

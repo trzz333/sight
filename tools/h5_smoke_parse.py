@@ -57,10 +57,13 @@ SHAPED_ONLY_FIELDS = {
     "active_hazard_count_above_player",
 }
 
-ALPHA = 0.05
+ALPHA = 0.05  # default; override via --alpha
 FLOAT_TOL = 1e-9
+# These globals are recomputed in main() once --alpha is parsed.
 BONUS_UPPER = ALPHA + FLOAT_TOL
-SATURATION_THRESHOLD = ALPHA - 0.001  # 0.049
+SATURATION_THRESHOLD = ALPHA * 0.98
+MEAN_BONUS_NONTERM_RANGE = (0.10 * ALPHA, 0.90 * ALPHA)
+MEAN_BONUS_ACTIVE_RANGE = (0.20 * ALPHA, 0.90 * ALPHA)
 
 
 def load_steps(path: Path) -> list[dict[str, Any]]:
@@ -253,18 +256,18 @@ def evaluate_shaped(ep_steps: list[dict[str, Any]], eid: str) -> dict[str, Any]:
     ))
     results["all_pass"] &= ok
 
-    ok = 0.005 <= mean_bonus <= 0.045
+    ok = MEAN_BONUS_NONTERM_RANGE[0] <= mean_bonus <= MEAN_BONUS_NONTERM_RANGE[1]
     results["checks"].append((
-        "mean_bonus_all_nonterm in [0.005, 0.045]",
+        f"mean_bonus_all_nonterm in [{MEAN_BONUS_NONTERM_RANGE[0]:.5f}, {MEAN_BONUS_NONTERM_RANGE[1]:.5f}]",
         ok,
         f"={mean_bonus:.5f}",
     ))
     results["all_pass"] &= ok
 
     if active_idx:
-        ok = 0.01 <= mean_bonus_active <= 0.045
+        ok = MEAN_BONUS_ACTIVE_RANGE[0] <= mean_bonus_active <= MEAN_BONUS_ACTIVE_RANGE[1]
         results["checks"].append((
-            "mean_bonus_active_threat in [0.01, 0.045]",
+            f"mean_bonus_active_threat in [{MEAN_BONUS_ACTIVE_RANGE[0]:.5f}, {MEAN_BONUS_ACTIVE_RANGE[1]:.5f}]",
             ok,
             f"={mean_bonus_active:.5f}",
         ))
@@ -407,7 +410,18 @@ def main() -> int:
     p.add_argument("--shaped", required=True, type=Path)
     p.add_argument("--default", required=True, type=Path,
                    dest="default_path")
+    p.add_argument("--alpha", type=float, default=0.05,
+                   help="reward_shaping_alpha used in the shaped run; "
+                        "sets bonus upper bound and threshold scaling")
     args = p.parse_args()
+
+    global ALPHA, BONUS_UPPER, SATURATION_THRESHOLD
+    global MEAN_BONUS_NONTERM_RANGE, MEAN_BONUS_ACTIVE_RANGE
+    ALPHA = float(args.alpha)
+    BONUS_UPPER = ALPHA + FLOAT_TOL
+    SATURATION_THRESHOLD = ALPHA * 0.98
+    MEAN_BONUS_NONTERM_RANGE = (0.10 * ALPHA, 0.90 * ALPHA)
+    MEAN_BONUS_ACTIVE_RANGE = (0.20 * ALPHA, 0.90 * ALPHA)
 
     try:
         shaped_steps = load_steps(args.shaped)
