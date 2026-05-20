@@ -245,6 +245,168 @@ def run_one_episode(
     return summary, rows
 
 
+# ---------------------------------------------------------------------------
+# K5.3 step-weighted aggregation + classification
+# ---------------------------------------------------------------------------
+
+# K5.3 classification constants. best_constant_mean_episode_length anchors
+# `constant_left` from K5.2 layer 6 (845.7 mean frames over 10 seeds).
+# materiality_threshold is 10% of that baseline; material_survival_bar is
+# baseline + threshold = 930.27. Both Grok GREEN reply and GPT K5.3 packet
+# adopt these exact numbers.
+K5_3_BEST_CONSTANT_MEAN_EPISODE_LENGTH: float = 845.7
+K5_3_MATERIALITY_THRESHOLD: float = 84.57
+K5_3_MATERIAL_SURVIVAL_BAR: float = (
+    K5_3_BEST_CONSTANT_MEAN_EPISODE_LENGTH + K5_3_MATERIALITY_THRESHOLD
+)
+
+
+def _stat_block(arr) -> dict:
+    """Mean/std/min/p05/p50/p95/max plus n. Empty-safe."""
+    a = np.asarray(arr, dtype=float)
+    if a.size == 0:
+        return {"n": 0}
+    return {
+        "n": int(a.size),
+        "mean": float(a.mean()),
+        "std": float(a.std()),
+        "min": float(a.min()),
+        "p05": float(np.percentile(a, 5)),
+        "p50": float(np.percentile(a, 50)),
+        "p95": float(np.percentile(a, 95)),
+        "max": float(a.max()),
+    }
+
+
+def _compute_k5_3_block(
+    step_p_left,
+    step_p_stay,
+    step_p_right,
+    step_sampled,
+    step_argmax,
+    sampled_mean_episode_length,
+) -> dict:
+    """Step-weighted K5.3 aggregates + classification + overlay.
+
+    Primary bucket is exclusive and ordered: ARGMAX-ARTIFACT first (requires
+    both diversity and material survival gain), then POLICY-DIST-COLLAPSE,
+    then SOFT-BAD-POLICY, then UNKNOWN. The NEAR-TIE-BIAS overlay is
+    independent of the primary bucket and reported separately.
+    """
+    n_steps = len(step_sampled)
+    sampled_arr = np.asarray(step_sampled, dtype=np.int64)
+    argmax_arr = np.asarray(step_argmax, dtype=np.int64)
+    pl_arr = np.asarray(step_p_left, dtype=np.float64)
+    ps_arr = np.asarray(step_p_stay, dtype=np.float64)
+    pr_arr = np.asarray(step_p_right, dtype=np.float64)
+    if n_steps == 0:
+        return {
+            "n_steps": 0,
+            "constants": {
+                "best_constant_mean_episode_length": K5_3_BEST_CONSTANT_MEAN_EPISODE_LENGTH,
+                "materiality_threshold": K5_3_MATERIALITY_THRESHOLD,
+                "material_survival_bar": K5_3_MATERIAL_SURVIVAL_BAR,
+            },
+            "k5_3_classification": {
+                "primary_bucket": "UNKNOWN",
+                "near_tie_bias_overlay": False,
+                "reason": "no_steps_recorded",
+            },
+        }
+    eps = 1e-12
+    pl_safe = np.maximum(pl_arr, eps)
+    ps_safe = np.maximum(ps_arr, eps)
+    pr_safe = np.maximum(pr_arr, eps)
+    entropy_arr = -(
+        pl_safe * np.log(pl_safe)
+        + ps_safe * np.log(ps_safe)
+        + pr_safe * np.log(pr_safe)
+    )
+    stacked = np.stack([pl_arr, ps_arr, pr_arr], axis=1)
+    sorted_desc = np.sort(stacked, axis=1)[:, ::-1]
+    margin_arr = sorted_desc[:, 0] - sorted_desc[:, 1]
+    diff_mask = sampled_arr != argmax_arr
+    diff_step_fraction = float(diff_mask.mean())
+
+    def _action_fracs(arr):
+        return {
+            ACTION_NAMES[a]: float((arr == a).mean()) for a in (0, 1, 2)
+        }
+
+    sampled_action_fractions = _action_fracs(sampled_arr)
+    argmax_action_fractions = _action_fracs(argmax_arr)
+    entropy_stats = _stat_block(entropy_arr)
+    margin_stats = _stat_block(margin_arr)
+    margin_lt_005_fraction = float((margin_arr < 0.05).mean())
+    per_action_probability = {
+        "left": _stat_block(pl_arr),
+        "stay": _stat_block(ps_arr),
+        "right": _stat_block(pr_arr),
+    }
+    argmax_counts = {a: int(np.sum(argmax_arr == a)) for a in (0, 1, 2)}
+    argmax_concentrated_on_single_action = bool(
+        max(argmax_counts.values()) == n_steps
+    )
+    argmax_dominant_action_name = None
+    for a, c in argmax_counts.items():
+        if c == n_steps:
+            argmax_dominant_action_name = ACTION_NAMES[a]
+            break
+
+    sampled_mean_ep_len = float(sampled_mean_episode_length)
+    entropy_mean = float(entropy_stats.get("mean", 0.0))
+    if (
+        diff_step_fraction > 0.05
+        and sampled_mean_ep_len > K5_3_MATERIAL_SURVIVAL_BAR
+    ):
+        primary_bucket = "ARGMAX-ARTIFACT"
+    elif diff_step_fraction <= 0.05 or entropy_mean < 0.1:
+        primary_bucket = "POLICY-DIST-COLLAPSE"
+    elif (
+        diff_step_fraction > 0.05
+        and sampled_mean_ep_len <= K5_3_MATERIAL_SURVIVAL_BAR
+    ):
+        primary_bucket = "SOFT-BAD-POLICY"
+    else:
+        primary_bucket = "UNKNOWN"
+
+    near_tie_bias_overlay = bool(
+        margin_lt_005_fraction > 0.50
+        and argmax_concentrated_on_single_action
+    )
+
+    return {
+        "n_steps": int(n_steps),
+        "constants": {
+            "best_constant_mean_episode_length": K5_3_BEST_CONSTANT_MEAN_EPISODE_LENGTH,
+            "materiality_threshold": K5_3_MATERIALITY_THRESHOLD,
+            "material_survival_bar": K5_3_MATERIAL_SURVIVAL_BAR,
+        },
+        "step_weighted_sampled_action_fractions": sampled_action_fractions,
+        "step_weighted_argmax_action_fractions": argmax_action_fractions,
+        "sampled_differs_from_argmax_step_fraction": diff_step_fraction,
+        "entropy_nats": entropy_stats,
+        "top1_top2_probability_margin": margin_stats,
+        "top1_top2_probability_margin_lt_0p05_fraction": margin_lt_005_fraction,
+        "per_action_probability": per_action_probability,
+        "argmax_action_step_counts": {ACTION_NAMES[a]: int(c) for a, c in argmax_counts.items()},
+        "argmax_concentrated_on_single_action": argmax_concentrated_on_single_action,
+        "argmax_dominant_action": argmax_dominant_action_name,
+        "k5_3_classification": {
+            "primary_bucket": primary_bucket,
+            "near_tie_bias_overlay": near_tie_bias_overlay,
+            "inputs_used": {
+                "sampled_differs_from_argmax_step_fraction": diff_step_fraction,
+                "sampled_mean_episode_length": sampled_mean_ep_len,
+                "material_survival_bar": K5_3_MATERIAL_SURVIVAL_BAR,
+                "entropy_nats_mean": entropy_mean,
+                "top1_top2_probability_margin_lt_0p05_fraction": margin_lt_005_fraction,
+                "argmax_concentrated_on_single_action": argmax_concentrated_on_single_action,
+            },
+        },
+    }
+
+
 def build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="h5_stochastic_eval",
@@ -322,6 +484,19 @@ def main(argv: list[str] | None = None) -> int:
     try:
         fh.write(json.dumps(header, separators=(",", ":")) + "\n")
         episode_id = 0
+        # K5.3 per-label step-level accumulators. Populated from step_rows
+        # as they stream out so the per-label classifier can use vectorised
+        # step-weighted statistics rather than per-episode means.
+        per_label_step_data: dict[str, dict[str, list]] = {
+            label: {
+                "p_left": [],
+                "p_stay": [],
+                "p_right": [],
+                "sampled": [],
+                "argmax": [],
+            }
+            for label, _, _ in loaded
+        }
         for label, model, _ in loaded:
             eval_run_dir = out_dir / f"godot_{label}{suffix}"
             eval_run_dir.mkdir(parents=True, exist_ok=True)
@@ -351,6 +526,12 @@ def main(argv: list[str] | None = None) -> int:
                         per_episode_summaries.append(ep_summary)
                         for sr in step_rows:
                             fh.write(json.dumps(sr, separators=(",", ":")) + "\n")
+                            d = per_label_step_data[sr["label"]]
+                            d["p_left"].append(float(sr["p_left"]))
+                            d["p_stay"].append(float(sr["p_stay"]))
+                            d["p_right"].append(float(sr["p_right"]))
+                            d["sampled"].append(int(sr["sampled_action"]))
+                            d["argmax"].append(int(sr["deterministic_argmax"]))
                         episode_id += 1
                         print(
                             f"  ep {episode_id - 1} {label} seed={eval_seed} rep={rep} "
@@ -448,6 +629,16 @@ def main(argv: list[str] | None = None) -> int:
             "seeds_with_any_terminal_diff": int(any_seed_differs_terminal),
             "per_seed": per_seed,
         }
+        # K5.3 step-weighted block + classification + overlay flag.
+        step_data = per_label_step_data.get(label, {})
+        per_label[label]["k5_3"] = _compute_k5_3_block(
+            step_p_left=step_data.get("p_left", []),
+            step_p_stay=step_data.get("p_stay", []),
+            step_p_right=step_data.get("p_right", []),
+            step_sampled=step_data.get("sampled", []),
+            step_argmax=step_data.get("argmax", []),
+            sampled_mean_episode_length=per_label[label]["episode_length"]["mean"],
+        )
 
     summary = {
         "_header": header,
@@ -471,6 +662,15 @@ def main(argv: list[str] | None = None) -> int:
             f"diff_frac_mean={agg['sampled_differs_from_argmax_fraction']['mean']:.3f} "
             f"left_frac_mean={agg['action_fractions_mean']['left']:.3f} "
             f"seeds_with_term_diff={agg['seeds_with_any_terminal_diff']}"
+        )
+        k5_3 = agg.get("k5_3", {})
+        cls = k5_3.get("k5_3_classification", {})
+        print(
+            f"    k5_3 verdict={cls.get('primary_bucket', 'UNKNOWN')} "
+            f"near_tie_bias={cls.get('near_tie_bias_overlay', False)} "
+            f"diff_step_frac={k5_3.get('sampled_differs_from_argmax_step_fraction', 0.0):.3f} "
+            f"ent_mean={k5_3.get('entropy_nats', {}).get('mean', 0.0):.3f} "
+            f"margin_lt_005_frac={k5_3.get('top1_top2_probability_margin_lt_0p05_fraction', 0.0):.3f}"
         )
     return 0
 
@@ -504,6 +704,22 @@ DETERMINISTIC_BASELINES: dict[str, dict[int, dict[str, Any]]] = {
         1007: {"episode_length": 273, "collision": True, "timeout": False},
         1008: {"episode_length": 1800, "collision": False, "timeout": True},
         1009: {"episode_length": 243, "collision": True, "timeout": False},
+    },
+    # K5.1 alpha=0.30 seed=0 10k-step shaped checkpoint. Per-seed deterministic
+    # eval lengths supplied by GPT K5.3 execution packet. All 10 seeds collide
+    # under deterministic argmax (handoff records 100% stay over 6060 reached
+    # eval steps, player_x held at 360.0 with zero lateral motion).
+    "k5_1_alpha030_seed0_10k": {
+        1000: {"episode_length": 333, "collision": True, "timeout": False},
+        1001: {"episode_length": 273, "collision": True, "timeout": False},
+        1002: {"episode_length": 843, "collision": True, "timeout": False},
+        1003: {"episode_length": 963, "collision": True, "timeout": False},
+        1004: {"episode_length": 1203, "collision": True, "timeout": False},
+        1005: {"episode_length": 1263, "collision": True, "timeout": False},
+        1006: {"episode_length": 543, "collision": True, "timeout": False},
+        1007: {"episode_length": 183, "collision": True, "timeout": False},
+        1008: {"episode_length": 183, "collision": True, "timeout": False},
+        1009: {"episode_length": 273, "collision": True, "timeout": False},
     },
 }
 
