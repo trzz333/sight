@@ -1,0 +1,87 @@
+run:
+  phase: K
+  name: signal_dodge_ppo_h5_state_shaped_alpha030
+  seed: 0
+  out_dir: runs/rl
+
+env:
+  id: godot:signal-dodge-v0
+  n_envs: 1
+  godot_executable: null
+  project_path: games/signal-dodge
+  max_steps: 1800
+  # K5.5 state-observation PPO control.
+  #
+  # Purpose:
+  #   Isolate whether K5.1's stay-pinned argmax is caused by single-frame
+  #   pixel representation, or by PPO/objective/budget failure even when
+  #   production state geometry is handed directly to the policy.
+  #
+  # Difference from prior H5 state comparator
+  # (configs/rl/signal_dodge_ppo_h5_state_comparator.yaml):
+  #   - Phase K diagnostic, not an H5 comparator.
+  #   - Matches K5.1 alpha=0.30 shaped reward condition
+  #     (reward_shaping: threat_weighted_clearance, alpha 0.30,
+  #      lookahead_band 270, safe_lateral_distance 180). The old state
+  #      comparator carried no reward_shaping keys at all.
+  #   - Uses reward-scale-divisor 30.0 at training time via the
+  #     --reward-scale-divisor CLI flag (train VecEnv only). The old
+  #     comparator applied no reward-scale divisor.
+  #   - Trains seeds 0,1,2 at total_timesteps 10000 each.
+  #   - Evaluates the deterministic policy on seeds 1000-1009.
+  #   - Uses the existing production 10-dim state vector exactly,
+  #     no new env schema:
+  #       obs[0] player_x_norm
+  #       obs[1] last applied move x (comment in main.gd calls it
+  #              player_vx_norm; implementation is last action)
+  #       obs[2..4] nearest hazard dx, dy, present
+  #       obs[5..7] second hazard dx, dy, present
+  #       obs[8..9] third hazard dx, dy (no explicit present flag)
+  #   - Does NOT add raw player_y, explicit arrival_steps, hazard
+  #     velocity, or frame_stack. Fixed hazard speed makes instantaneous
+  #     dy a sufficient statistic for arrival timing; a memoryless
+  #     MlpPolicy does not integrate across frames, so the schema is
+  #     adequate for this control without velocity fields.
+  #
+  # State mode retains windowed Godot launch to match the K5.1 launch
+  # posture and the Phase E/F observation pipeline. The policy consumes
+  # the 10-dim state vector, not pixels.
+  headless: false
+  observation_mode: state
+  reward_shaping: threat_weighted_clearance
+  reward_shaping_alpha: 0.30
+  reward_shaping_lookahead_band: 270
+  reward_shaping_safe_lateral_distance: 180
+
+algo:
+  framework: stable-baselines3
+  name: PPO
+  # MlpPolicy is mechanically required by the (10,) state obs shape.
+  policy: MlpPolicy
+  device: cpu
+  # PPO recipe held identical to K5.1 (Phase D/E entropy recipe) so the
+  # observation contract is the single independent variable vs K5.1.
+  hyperparams:
+    n_steps: 256
+    batch_size: 64
+    n_epochs: 4
+    ent_coef: 0.01
+    learning_rate: 0.0003
+    gamma: 0.99
+    gae_lambda: 0.95
+    clip_range: 0.2
+
+train:
+  total_timesteps: 10000
+
+eval:
+  eval_freq: 2048
+  n_eval_episodes: 1
+  deterministic: true
+
+logging:
+  format: ndjson
+
+checkpoint:
+  enabled: true
+  filename: model.zip
