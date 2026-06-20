@@ -14,7 +14,7 @@ GPT and Grok are removed from the loop (Jeff unsubscribed). Sight is now single-
 ## Per-turn operating contract
 
 - found-art reflex on any obstacle: generalize the problem, search prior art (papers, libraries, known fixes) before building, verdict-first ADOPT/ADAPT/BUILD with the search named.
-- Evidence-anchored self-audit: verify load-bearing claims against on-disk artifacts, git hashes, re-run evals. Tool output over memory. Introspection is not verification.
+- Evidence-anchored self-audit: verify load-bearing claims against on-disk artifacts and git hashes. Re-reading a committed artifact is a valid anchor; re-run an eval only when freshness is in doubt (new or uncommitted code, changed config). Tool output over memory. Introspection is not verification.
 - Lateral / infra-loop audit: one structurally different angle on the current wall each turn. Method fails twice, change the method.
 - One-paragraph layman summary at the bottom of every turn.
 - Earned agreement only. No flattery, no manufactured dissent, no challenge for its own sake.
