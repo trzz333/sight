@@ -6,7 +6,7 @@ Canonical handoff document. Updated at the end of every session by whoever execu
 
 **Phase:** Phase K (K5.5 state-observation PPO control classified STATE-CONTROL-FAIL-ACTIVE-BAD; state observation does not rescue the agent, single-frame pixels exonerated as the sole blocker). Governance changed to single-voice this session.
 
-**Last commit:** `TBD` governance: single-voice handoff skill, self-audit + found-art + layman-summary contract
+**Last commit:** `a58ebe5` governance: single-voice handoff skill, self-audit + found-art + layman-summary contract
 
 **Current task:** K5.5 closed and pushed (evidence `docs/k5-5-state-observation-control-evidence.md`). Three seeds at 10k each, 0 of 3 clear the 930.27 survival bar, pooled collision 0.967, all three converged to degenerate single-action policies (seed0 constant-left mean 845.7 = K5.2 best constant; seed1/seed2 constant-stay mean 606.0 = K5.1 stay-pinned / collision 1.00). Leading hypothesis on record: `threat_weighted_clearance` shaping is satisfiable by a constant action, which explains constant-policy convergence. This session was governance only: GPT and Grok removed (Jeff unsubscribed), project is now single-voice with Claude as architect, executor, self-auditor, and lateral-auditor; `/sight-handoff` skill rewritten to match; new per-turn operating contract added (found-art reflex, evidence-anchored self-audit, lateral/infra-loop audit, one-paragraph layman summary, earned-agreement sycophancy posture, fluid rules). No training run this session.
 
