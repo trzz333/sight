@@ -192,9 +192,9 @@ def _write(frames, records, out_dir: Path, ckpt_path: Path, seed: int,
         "git_commit": _short_git_commit(),
         "screen": [SCREEN_W, SCREEN_H],
         "note": (
-            "Faithful top-down render of the BC policy's state-mode rollout "
-            "(same path as k5_6_bc_eval_inenv, mean 1737.3 vs bar 930.27). "
-            "Player = cyan box, hazards = red boxes, true game geometry."
+            "Faithful top-down render of the checkpoint's state-mode rollout "
+            "(same env path as k5_6_bc_eval_inenv, bar 930.27). Player = cyan "
+            "box, hazards = red boxes, true game geometry. See manifest 'ckpt'."
         ),
     }
     (out_dir / "manifest.json").write_text(
