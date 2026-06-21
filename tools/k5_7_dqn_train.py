@@ -53,7 +53,7 @@ for _p in (REPO_ROOT / "src", REPO_ROOT / "tools"):
 
 from stable_baselines3 import DQN  # noqa: E402
 from stable_baselines3.common.callbacks import BaseCallback  # noqa: E402
-from stable_baselines3.common.vec_env import VecNormalize  # noqa: E402
+from stable_baselines3.common.vec_env import VecMonitor, VecNormalize  # noqa: E402
 
 from sight_agent.rl.factories import make_env, GODOT_SIGNAL_DODGE_V0  # noqa: E402
 
@@ -130,6 +130,7 @@ def main(argv: list[str] | None = None) -> int:
         run_dir=str(out_dir / "godot"), max_steps=int(args.max_steps),
         headless=True, observation_mode="state", reward_shaping="none",
     )
+    venv = VecMonitor(venv)  # populate ep_info_buffer so ep_rew_mean/ep_len_mean log
     venv = VecNormalize(venv, norm_obs=True, norm_reward=False, clip_obs=10.0)
 
     model = DQN(
