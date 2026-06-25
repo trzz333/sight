@@ -6,7 +6,7 @@ Canonical handoff document. Updated at the end of every session by whoever execu
 
 **Phase:** Phase K. From-scratch N=10 reliability verdict FINAL (negative). K6 self-supervised on/off comparison COMPLETE and FINAL (negative).
 
-**Last commit:** `5a3527d` chore: refresh handoff - N=10 verdict final negative, K6 on/off sweep interrupted at seed 3. (This handoff and `tools\run_k6_finish.bat` are committed on top of it this session; reliability numbers below live in prose because `runs/` is gitignored.)
+**Last commit:** `45941fd` K6 self-supervised on/off comparison FINAL (negative); sequential WMI-detached finisher. (Reliability numbers below live in prose because `runs/` is gitignored.)
 
 **Current task:** K6 on-vs-off comparison is DONE. The sequential finisher (`tools\run_k6_finish.bat`, launched detached via WMI Win32_Process.Create) ran ~14.5h and completed cleanly, surviving the full run with no cascade-kill. All 10 runs (5 seeds x 2 arms, 200k) have real eval reports (10 episodes each). Reliability comparison computed per arm via `tools\k5_8_reliability_report.py`.
 
