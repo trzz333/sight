@@ -8,12 +8,17 @@ because dependability in deep RL is a property measured across training seeds
 the Edge of the Statistical Precipice", NeurIPS).
 
 Method is adopted from Agarwal et al. 2021 (the rliable framework): interquartile
-mean (IQM), stratified bootstrap percentile confidence intervals, and a
-performance profile. Implemented directly in numpy/scipy here because the
-reference package (rliable) hard-imports `arch.bootstrap`, which has no Python
-3.14 wheel and needs an MSVC toolchain absent on this machine. For a single task
-(Signal Dodge), stratified bootstrap reduces to ordinary resampling of runs with
-replacement, so this implementation is faithful to the single-task case.
+mean (IQM), bootstrap percentile confidence intervals, and a performance profile.
+The bootstrap CI uses scipy.stats.bootstrap (an off-the-shelf primitive, no new
+deps) rather than a hand-rolled resampling loop.
+
+rliable itself is NOT adopted wholesale. It pins arch<8.0, and only arch>=8.0
+ships a Python 3.14 (cp314) Windows wheel; installing rliable therefore drags in
+arch 7.2.0 as an sdist that needs an MSVC/Cython source build absent on this
+machine (verified 2026-06-25 via pip --dry-run). For a single task (Signal
+Dodge), stratified bootstrap reduces to ordinary resampling of runs with
+replacement, so scipy's bootstrap is faithful to the single-task case and
+rliable's cross-task machinery would be overkill regardless.
 
 Score per seed = mean held-out episode length (the eval metric, bar 930.27).
 """
@@ -49,15 +54,29 @@ def iqm(x):
     return float(stats.trim_mean(x, 0.25))
 
 
-def boot_ci(x, fn, reps=10000, alpha=0.05, seed=0):
-    rng = np.random.default_rng(seed)
-    x = np.asarray(x, float)
-    n = len(x)
-    stats_ = np.empty(reps)
-    for b in range(reps):
-        stats_[b] = fn(x[rng.integers(0, n, n)])
-    lo, hi = np.percentile(stats_, [100 * alpha / 2, 100 * (1 - alpha / 2)])
-    return float(lo), float(hi)
+def _iqm_axis(x, axis):
+    # axis-aware IQM so scipy.stats.bootstrap can vectorize the resampling
+    return stats.trim_mean(x, 0.25, axis=axis)
+
+
+def _mean_axis(x, axis):
+    return np.mean(x, axis=axis)
+
+
+def boot_ci(x, stat_axis_fn, reps=10000, alpha=0.05, seed=0):
+    # Off-the-shelf bootstrap CI (scipy.stats.bootstrap) in place of a hand-rolled
+    # resample loop. Percentile method: matches rliable's single-task CI and stays
+    # stable at small n (BCa's jackknife acceleration is unreliable at n=5).
+    res = stats.bootstrap(
+        (np.asarray(x, float),),
+        stat_axis_fn,
+        n_resamples=reps,
+        confidence_level=1.0 - alpha,
+        method="percentile",
+        rng=np.random.default_rng(seed),
+    )
+    ci = res.confidence_interval
+    return float(ci.low), float(ci.high)
 
 
 def perf_profile(x, taus):
@@ -82,8 +101,8 @@ def main():
     iqm_pt = iqm(scores)
     mean_pt = float(np.mean(scores))
     median_pt = float(np.median(scores))
-    iqm_lo, iqm_hi = boot_ci(scores, iqm, reps=args.reps)
-    mean_lo, mean_hi = boot_ci(scores, np.mean, reps=args.reps)
+    iqm_lo, iqm_hi = boot_ci(scores, _iqm_axis, reps=args.reps)
+    mean_lo, mean_hi = boot_ci(scores, _mean_axis, reps=args.reps)
 
     frac_above_bar = float(np.mean(scores >= BAR))
     frac_above_best_const = float(np.mean(scores >= BEST_CONSTANT))
@@ -106,7 +125,7 @@ def main():
         "frac_nondegenerate": frac_nondegenerate,
         "perf_profile_taus": taus,
         "perf_profile_frac_ge_tau": profile,
-        "method": "IQM + stratified bootstrap percentile CI + performance profile, Agarwal et al. 2021 (rliable); reimplemented numpy/scipy single-task",
+        "method": "IQM + percentile bootstrap CI (scipy.stats.bootstrap, 10k resamples) + performance profile; method per Agarwal et al. 2021 (rliable), single-task",
     }
     json.dump(report, open(args.out, "w"), indent=2)
 
