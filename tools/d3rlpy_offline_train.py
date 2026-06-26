@@ -106,7 +106,9 @@ def main(argv=None) -> int:
     # --- DiscreteCQL on the full mixed dataset ---
     full = make_dataset(obs, act, rew, term, timeout)
     cql = DiscreteCQLConfig(
-        observation_scaler=StandardObservationScaler()
+        observation_scaler=StandardObservationScaler(),
+        n_critics=3,
+        alpha=0.5,
     ).create(device=args.device)
     report["cql_final_metrics"] = fit_algo(cql, full, args.cql_steps, "cql", out)
     cql_pt = out / "cql_policy.pt"
