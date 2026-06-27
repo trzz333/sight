@@ -44,6 +44,7 @@ from stable_baselines3.common.monitor import Monitor  # noqa: E402
 from stable_baselines3.common.vec_env import (  # noqa: E402
     DummyVecEnv,
     SubprocVecEnv,
+    VecNormalize,
 )
 
 DEFAULT_EXE = (
@@ -141,6 +142,15 @@ def main(argv=None) -> int:
         n_envs=args.n_envs, seed=args.seed, run_root=train_root,
         exe=args.exe, project=args.project, vec=args.vec,
     )
+    # M2.1: normalize obs + returns. M2 defect was explained_variance~=0:
+    # the critic could not fit the large high-gamma dense returns. Scaling
+    # returns to ~unit variance (gamma-matched) is the SB3-standard fix.
+    # Stats saved to vecnormalize.pkl; eval reloads them (training=False,
+    # norm_reward=False) so the policy sees its trained obs scale.
+    env = VecNormalize(
+        env, norm_obs=True, norm_reward=True, gamma=args.gamma,
+        clip_obs=10.0, clip_reward=10.0,
+    )
     model = PPO(
         "MlpPolicy", env, seed=args.seed, device="cpu", verbose=1,
         n_steps=args.n_steps, batch_size=args.batch_size,
@@ -160,9 +170,20 @@ def main(argv=None) -> int:
         except Exception as exc:  # noqa: BLE001
             learn_err = learn_err or f"save:{type(exc).__name__}: {exc}"
         try:
+            env.save(str(out / "vecnormalize.pkl"))
+        except Exception as exc:  # noqa: BLE001
+            learn_err = learn_err or f"vecnorm:{type(exc).__name__}: {exc}"
+        try:
             env.close()
         except Exception:
             pass
+
+    logvals = dict(
+        getattr(getattr(model, "logger", None), "name_to_value", {}) or {}
+    )
+    explained_variance = logvals.get("train/explained_variance")
+    value_loss = logvals.get("train/value_loss")
+    vecnorm_saved = (out / "vecnormalize.pkl").is_file()
 
     buf = list(getattr(model, "ep_info_buffer", []) or [])
     ep_lens = [float(e["l"]) for e in buf if "l" in e]
@@ -170,10 +191,14 @@ def main(argv=None) -> int:
     ep_len_mean = float(np.mean(ep_lens)) if ep_lens else None
     ep_rew_mean = float(np.mean(ep_rews)) if ep_rews else None
     finite = ep_len_mean is not None and np.isfinite(ep_len_mean)
-    ok = learn_err is None and finite and (out / "model.zip").is_file()
+    ok = (
+        learn_err is None and finite
+        and (out / "model.zip").is_file() and vecnorm_saved
+    )
 
     report = {
         "phase": "M2",
+        "phase_variant": "M2.1",
         "env": "godot:signal-dodge-v0",
         "observation_mode": "state",
         "reward_shaping": "none",
@@ -189,6 +214,10 @@ def main(argv=None) -> int:
         "n_epochs": args.n_epochs,
         "learning_rate": args.lr,
         "clip_range": args.clip_range,
+        "vecnormalize": True,
+        "explained_variance": explained_variance,
+        "value_loss": value_loss,
+        "vecnormalize_saved": vecnorm_saved,
         "ep_len_mean_last100": ep_len_mean,
         "ep_rew_mean_last100": ep_rew_mean,
         "n_episodes_in_buffer": len(buf),

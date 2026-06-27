@@ -36,7 +36,10 @@ if str(_SRC) not in sys.path:
 
 import numpy as np  # noqa: E402
 from stable_baselines3 import PPO  # noqa: E402
-from stable_baselines3.common.vec_env import DummyVecEnv  # noqa: E402
+from stable_baselines3.common.vec_env import (  # noqa: E402
+    DummyVecEnv,
+    VecNormalize,
+)
 
 SURVIVAL_BAR = 930.27
 MAX_STEPS = 1800
@@ -114,9 +117,19 @@ def roll_episode(model, vec, seed: int) -> dict:
     return {"seed": int(seed), "length": int(length), "action_counts": counts}
 
 
-def eval_model(label: str, run_dir: Path, vec, seeds: list[int]) -> dict:
+def eval_model(label: str, run_dir: Path, base_vec, seeds: list[int]) -> dict:
     model = PPO.load(str(run_dir / "model.zip"), env=None, device="cpu")
-    eps = [roll_episode(model, vec, s) for s in seeds]
+    # M2.1: each model carries its own obs-normalization stats. Reload them
+    # and roll with training=False (freeze stats), norm_reward=False (we
+    # measure raw survival length). Models without a pkl roll on raw obs.
+    pkl = run_dir / "vecnormalize.pkl"
+    if pkl.is_file():
+        rollvec = VecNormalize.load(str(pkl), base_vec)
+        rollvec.training = False
+        rollvec.norm_reward = False
+    else:
+        rollvec = base_vec
+    eps = [roll_episode(model, rollvec, s) for s in seeds]
     lengths = [e["length"] for e in eps]
     tot = {0: 0, 1: 0, 2: 0}
     for e in eps:
@@ -141,6 +154,7 @@ def eval_model(label: str, run_dir: Path, vec, seeds: list[int]) -> dict:
         "n_seeds": len(seeds),
         "action_fractions": frac,
         "max_action_fraction": max_frac,
+        "vecnormalize_loaded": bool(pkl.is_file()),
         "per_seed_length": {str(e["seed"]): e["length"] for e in eps},
         "gate_pass": bool(passed),
     }
@@ -153,6 +167,7 @@ def main(argv=None) -> int:
     p.add_argument("--seeds", default="1000-1009")
     p.add_argument("--exe", default=DEFAULT_EXE)
     p.add_argument("--project", default=DEFAULT_PROJECT)
+    p.add_argument("--variant", default="M2")
     p.add_argument("--out", required=True)
     args = p.parse_args(argv)
 
@@ -185,9 +200,9 @@ def main(argv=None) -> int:
             pass
 
     n_pass = sum(1 for r in results if r.get("gate_pass"))
-    verdict = "M2-PASS" if n_pass >= 1 else "M2-FAIL"
+    verdict = f"{args.variant}-PASS" if n_pass >= 1 else f"{args.variant}-FAIL"
     summary = {
-        "phase": "M2-eval",
+        "phase": f"{args.variant}-eval",
         "survival_bar": SURVIVAL_BAR,
         "eval_seeds": seeds,
         "gate": "mean>=930.27 AND frac_L>=0.03 AND frac_R>=0.03 AND max(frac)<0.97",
