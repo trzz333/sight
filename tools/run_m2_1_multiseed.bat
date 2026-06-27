@@ -1,8 +1,10 @@
 @echo off
 setlocal
-set "PY=C:\Users\maste\AppData\Local\Python\bin\python.exe"
+set "PY=C:\Python314\python.exe"
 set "ROOT=C:\Projects\Sight"
 set "RUNS=%ROOT%\runs\phase_m"
+set "SIGHT_GODOT_EXE=C:\Users\maste\AppData\Local\Microsoft\WinGet\Packages\GodotEngine.GodotEngine_Microsoft.Winget.Source_8wekyb3d8bbwe\Godot_v4.6.2-stable_win64.exe"
+set "PYTHONPATH=C:\Users\maste\AppData\Roaming\Python\Python314\site-packages"
 cd /d "%ROOT%"
 if not exist "%RUNS%" mkdir "%RUNS%"
 echo [m2.1] batch start %DATE% %TIME% > "%RUNS%\m2_1_multiseed.log"
