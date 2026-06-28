@@ -47,6 +47,16 @@ _SRC = _REPO_ROOT / "src"
 if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
+# Detached-launch env fix: a WMI-detached process runs with a minimal
+# environment (no APPDATA), so the user-site dir is not auto-discovered and
+# PYTHONPATH from the batch file does not reach it. cma/numpy/torch all live
+# in user-site on this machine, so inject it onto sys.path explicitly before
+# importing any third-party package. Foreground imports already work; this
+# only adds the path when missing.
+_USER_SITE = r"C:\Users\maste\AppData\Roaming\Python\Python314\site-packages"
+if _USER_SITE not in sys.path and Path(_USER_SITE).is_dir():
+    sys.path.insert(0, _USER_SITE)
+
 import numpy as np  # noqa: E402
 
 DEFAULT_EXE = (
@@ -422,12 +432,18 @@ def run_es(args, vec_env, policies, actor_keys, numel, out: Path) -> dict:
         history.append(rec)
         print(json.dumps(rec))
         # Persist incrementally so a kill mid-run still yields the best vector.
+        # Save BOTH the best sampled candidate (noise-biased: argmax of a noisy
+        # 2-seed fitness over-selects lucky seeds) and the CMA distribution mean
+        # (es.result.xfavorite), which is pycma's noise-robust recommendation
+        # and the one the gate eval should trust under noisy fitness.
         np.save(str(out / "best_actor_vec.npy"), best_vec)
+        np.save(str(out / "best_mean_vec.npy"), np.asarray(es.result.xfavorite, dtype=np.float64))
         with (out / "es_history.json").open("w", encoding="utf-8") as f:
             json.dump(history, f, indent=2)
         gen += 1
 
     np.save(str(out / "best_actor_vec.npy"), best_vec)
+    np.save(str(out / "best_mean_vec.npy"), np.asarray(es.result.xfavorite, dtype=np.float64))
     load_actor(policies[0], actor_keys, best_vec)
     return {
         "mode": "es",

@@ -1,8 +1,8 @@
 @echo off
 setlocal
-set "PY=C:\Python314\python.exe"
+set "PY=C:\Projects\Sight\.venv-c1\Scripts\python.exe"
 set "ROOT=C:\Projects\Sight"
-set "PYTHONPATH=C:\Users\maste\AppData\Roaming\Python\Python314\site-packages"
+set "PYTHONNOUSERSITE=1"
 set "OUT=%ROOT%\runs\phase_n\c1_trend_s0"
 cd /d "%ROOT%"
 if not exist "%OUT%" mkdir "%OUT%"
