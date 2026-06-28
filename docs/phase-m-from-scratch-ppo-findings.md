@@ -50,3 +50,35 @@ clears it reliably and by a wide margin.
 - Train reports: runs\phase_m\m2_1_s{0,1,2}\m2_train_report.json (gitignored).
 - Tools: tools\m2_state_ppo_train.py, tools\m2_state_ppo_eval.py,
   tools\run_m2_1_multiseed.bat (commit b19cf06 carries NLDC migration paths).
+
+## Aggregate statistic: IQM + 95% stratified-bootstrap CI (Agarwal et al. 2021)
+
+Finalizes the M2.1 record independent of the direction call. Computed over the
+30 held-out eval episode lengths (3 train seeds x 10 eval seeds 1000-1009).
+
+- found-art verdict: ADAPT. rliable (Agarwal et al. 2021) is the canonical impl
+  but is not installed on the Py3.14 global interp and pins older numpy; rather
+  than perturb the load-bearing M-phase env, the two definitions were reproduced
+  exactly: IQM = scipy.stats.trim_mean(x, 0.25) (identical to
+  rliable.metrics.aggregate_iqm) and a stratified-by-seed percentile bootstrap
+  (resample episodes with replacement within each seed, pool, recompute IQM;
+  50000 reps, rng seed 0). IQM primitive unit-checked (trim_mean(1..100,0.25)==50.5).
+
+- Survival bar: 930.27
+- Per-seed mean lengths: 417.3 / 696.8 / 778.1
+- Grand mean (30 eps): 630.73
+- IQM: 418.25
+- 95% CI (stratified bootstrap, percentile): [314.44, 670.50]
+- P(bootstrap IQM >= bar): 0.0003
+
+Read: the IQM and its entire 95% CI fall below the 930.27 bar; the upper bound
+(670.50) does not reach it, and essentially no bootstrap resample clears it
+(0.03%). IQM (418) sits well below the grand mean (631) because the right tail of
+1800-step cap survivals inflates the mean; trimming those tails is exactly the
+robustness IQM provides, and the gap quantifies the "high-variance sub-baseline"
+failure mode. M2.1 is FINAL NEGATIVE at the aggregate level, not only at the
+single-seed point estimates. Confidence HIGH (hand-verified IQM, unit-checked
+primitive, reproducible committed script; result JSON local).
+
+- Tool: tools\m2_1_iqm_ci.py (committed; reproduces these numbers from the eval JSON).
+- Result: runs\phase_m\m2_1_eval3\iqm_ci_result.json (gitignored, local; numbers above are the record).
