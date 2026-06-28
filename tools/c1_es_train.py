@@ -386,22 +386,43 @@ def run_smoke(args, vec_env, policies, actor_keys, numel) -> dict:
 
 def run_es(args, vec_env, policies, actor_keys, numel, out: Path) -> dict:
     """Separable CMA-ES optimization loop. Saves best actor vector + report."""
-    import cma
+    import cma, pickle
 
     popsize = args.popsize if args.popsize > 0 else int(4 + 3 * np.log(numel))
     x0 = flatten_actor(policies[0], actor_keys)  # SB3 default init as ES mean
-    es = cma.CMAEvolutionStrategy(
-        list(x0), args.sigma0,
-        {"CMA_diagonal": True, "popsize": popsize, "seed": args.seed,
-         "maxiter": args.gens, "verbose": -9},
-    )
-    history = []
-    best_fit = -1.0
-    best_mean_len = -1.0
-    best_vec = x0.copy()
-    t0 = time.time()
-    gen = 0
+    ckpt = out / "es_state.pkl"
+
+    if args.resume and ckpt.exists():
+        with ckpt.open("rb") as f:
+            st = pickle.load(f)
+        es = st["es"]
+        history = st["history"]
+        best_fit = st["best_fit"]
+        best_mean_len = st["best_mean_len"]
+        best_vec = st["best_vec"]
+        gen = st["gen"]
+        elapsed_offset = st["elapsed"]
+        print(json.dumps({"resumed_from_gen": gen,
+                          "elapsed_offset_s": round(elapsed_offset, 1)}))
+    else:
+        es = cma.CMAEvolutionStrategy(
+            list(x0), args.sigma0,
+            {"CMA_diagonal": True, "popsize": popsize, "seed": args.seed,
+             "maxiter": args.gens, "verbose": -9},
+        )
+        history = []
+        best_fit = -1.0
+        best_mean_len = -1.0
+        best_vec = x0.copy()
+        gen = 0
+        elapsed_offset = 0.0
+    t0 = time.time() - elapsed_offset
+    launch_t0 = time.time()
     while not es.stop() and gen < args.gens:
+        if args.max_wall_s > 0 and (time.time() - launch_t0) >= args.max_wall_s:
+            print(json.dumps({"wall_budget_stop_s": round(args.max_wall_s, 1),
+                              "stopped_before_gen": gen}))
+            break
         cands = es.ask()
         # Fresh seeds per generation (common random numbers within the gen:
         # all candidates face the same seeds -> fair ranking for CMA).
@@ -440,6 +461,13 @@ def run_es(args, vec_env, policies, actor_keys, numel, out: Path) -> dict:
         np.save(str(out / "best_mean_vec.npy"), np.asarray(es.result.xfavorite, dtype=np.float64))
         with (out / "es_history.json").open("w", encoding="utf-8") as f:
             json.dump(history, f, indent=2)
+        # Atomic full-state checkpoint so any crash can --resume, not restart.
+        tmp = out / "es_state.pkl.tmp"
+        with tmp.open("wb") as f:
+            pickle.dump({"es": es, "history": history, "best_fit": best_fit,
+                         "best_mean_len": best_mean_len, "best_vec": best_vec,
+                         "gen": gen + 1, "elapsed": elapsed}, f)
+        tmp.replace(out / "es_state.pkl")
         gen += 1
 
     np.save(str(out / "best_actor_vec.npy"), best_vec)
@@ -474,6 +502,13 @@ def build_arg_parser() -> argparse.ArgumentParser:
                         "linearly slower.")
     p.add_argument("--smoke", action="store_true",
                    help="throughput smoke-test only; times one packed gen")
+    p.add_argument("--resume", action="store_true",
+                   help="resume full CMA state from out/es_state.pkl if present, "
+                        "else start fresh")
+    p.add_argument("--max-wall-s", type=float, default=0.0,
+                   help="if >0, stop THIS launch cleanly after N seconds and "
+                        "checkpoint (resumable). CMA maxiter stays --gens, so a "
+                        "later --resume continues toward the full target.")
     p.add_argument("--exe", default=DEFAULT_EXE)
     p.add_argument("--project", default=DEFAULT_PROJECT)
     p.add_argument("--out", required=True)
