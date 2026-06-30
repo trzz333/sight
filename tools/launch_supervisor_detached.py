@@ -1,9 +1,10 @@
 import subprocess, sys
 # Launch the Python supervisor console-less (DETACHED_PROCESS) so console
 # Ctrl/CLOSE events from any interactive shell cannot kill it. Safe because the
-# supervisor itself has no worker pool; it spawns each trainer with its OWN new
-# console (CREATE_NEW_CONSOLE, set inside run_c1_supervised.py) so the Godot
-# pool gets valid handles while staying decoupled from caller shells.
+# supervisor itself has no worker pool; it spawns each trainer with a hidden
+# console (CREATE_NO_WINDOW, set inside run_c1_supervised.py) so the Godot
+# pool gets valid console handles while staying decoupled from caller shells
+# and producing NO visible window.
 DETACHED_PROCESS = 0x00000008
 CREATE_NEW_PROCESS_GROUP = 0x00000200
 seed = sys.argv[1] if len(sys.argv) > 1 else "0"

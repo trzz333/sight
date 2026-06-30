@@ -41,7 +41,8 @@ def kill_godot():
     subprocess.run(
         ["powershell", "-NoProfile", "-Command",
          "Get-Process godot* -ErrorAction SilentlyContinue | Stop-Process -Force"],
-        capture_output=True)
+        capture_output=True,
+        creationflags=0x08000000)   # CREATE_NO_WINDOW: no PowerShell flash on each restart
 
 
 def main():

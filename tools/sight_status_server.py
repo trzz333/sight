@@ -25,7 +25,8 @@ def godot_workers():
     try:
         out = subprocess.run(
             ["tasklist", "/fi", "imagename eq godot*", "/fo", "csv", "/nh"],
-            capture_output=True, text=True, timeout=8).stdout
+            capture_output=True, text=True, timeout=8,
+            creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0)).stdout
         return sum(1 for ln in out.splitlines() if ln.strip().lower().startswith('"godot'))
     except Exception:
         return -1
