@@ -6,7 +6,7 @@ Canonical handoff document. Updated at the end of every session by whoever execu
 
 **Phase:** Phase N (from-scratch RL via structurally-distinct paradigms). C1 = Evolution Strategies (separable CMA-ES). On NLDC (hostname MSI, user maste). Phase M closed FINAL NEGATIVE.
 
-**Last commit:** `PENDING` Phase N C1: seeds 0+1 evaluated sub-bar, console-less infra + stoplight server
+**Last commit:** `5b8ceec` Phase N C1: seeds 0+1 evaluated sub-bar, console-less infra + stoplight server
 
 **Current task:** C1 ES screen, gen-100 held-out results across seeds. Seed 0 (gen 100): CMA-mean 906.4, best-actor 845.4. Seed 1 (gen 100): CMA-mean 591.0, best-actor 707.7. All four sub-bar (gate 930.27). Seed 0's 906.4 cleared the gen-5 peak (879.6) and every diversity sub-gate, which is why seeds 1+2 were staged per the pre-registered rule; seed 1 then collapsed to 591.0, showing high between-seed variance and non-reproducibility of seed 0's near-miss. Seed 2 reached gen 8 then was KILLED to stop window spam, INCOMPLETE. Two of three seeds done, both sub-bar. KEY INFRA FINDING this session: WMI cmd-console detached processes die on console CLOSE/Ctrl events when interactive shells churn, NOT reboot; this killed seed 2 at gen 5, the supervisor mid-launch, and the status server repeatedly. Seeds 0/1 only survived because nothing touched the machine while running. Eval metric values anchored to this session's eval-program stdout; the four eval JSONs are currently permission-locked for re-read (lingering lock/ACL artifact).
 
