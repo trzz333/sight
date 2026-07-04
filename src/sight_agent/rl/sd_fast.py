@@ -61,6 +61,16 @@ PLAYER_DX = PLAYER_SPEED / PHYSICS_HZ      # 5.0 px/step
 HAZARD_DY = HAZARD_SPEED / PHYSICS_HZ      # 3.333.. px/step
 DEFAULT_MAX_STEPS = 1800
 
+# --- potential-based reward shaping (Ng et al. 1999), reward_mode="shaped" ---
+# Phi(s) = imminence * horizontal_clearance of the nearest hazard above player.
+# imminence ramps 0->1 as the nearest hazard falls within SHAPE_IMM_RANGE px
+# vertically; clearance saturates at SHAPE_SAFE_DX px horizontally. Widening the
+# gap to an imminent threat raises Phi (positive shaping); drifting into its
+# column lowers Phi (negative shaping). PBS => optimal policy is unchanged vs
+# reward "none"; only the gradient toward active dodging is sharpened.
+SHAPE_IMM_RANGE = 300.0       # vertical lookahead (px); hazard beyond this = not yet a threat
+SHAPE_SAFE_DX = 80.0          # horizontal clearance (px) treated as fully safe (>collide 28)
+
 # action wire -> dir, matches main.gd _h3_map_action: 0 left(-1), 1 stay(0), 2 right(+1)
 _ACTION_DIR = (-1.0, 0.0, 1.0)
 
@@ -70,9 +80,21 @@ class SignalDodgeFast(gym.Env):
 
     metadata = {"render_modes": []}
 
-    def __init__(self, max_steps: int = DEFAULT_MAX_STEPS) -> None:
+    def __init__(
+        self,
+        max_steps: int = DEFAULT_MAX_STEPS,
+        reward_mode: str = "none",
+        shape_coef: float = 0.5,
+        shape_gamma: float = 0.999,
+    ) -> None:
         super().__init__()
         self.max_steps = int(max_steps)
+        if reward_mode not in ("none", "shaped"):
+            raise ValueError(f"reward_mode must be 'none' or 'shaped', got {reward_mode!r}")
+        self._reward_mode = reward_mode
+        self._shape_coef = float(shape_coef)
+        self._shape_gamma = float(shape_gamma)
+        self._prev_phi = 0.0
         self.action_space = spaces.Discrete(3)
         self.observation_space = spaces.Box(-1.0, 1.0, shape=(10,), dtype=np.float32)
         self._px = PLAYER_START_X
@@ -93,6 +115,7 @@ class SignalDodgeFast(gym.Env):
         self._hy = []
         self._hid = []
         self._id_counter = 0
+        self._prev_phi = self._potential()
         return self._obs(), {}
 
     def step(self, action: int):
@@ -133,9 +156,35 @@ class SignalDodgeFast(gym.Env):
             self._hid.append(self._id_counter)
         # 6. truncate
         truncated = (not terminated) and self._frame >= self.max_steps
-        # 7. reward "none"
-        reward = 0.0 if terminated else 1.0
+        # 7. reward
+        if self._reward_mode == "shaped":
+            base = 0.0 if terminated else 1.0
+            phi_next = 0.0 if terminated else self._potential()
+            reward = base + self._shape_coef * (self._shape_gamma * phi_next - self._prev_phi)
+            self._prev_phi = phi_next
+        else:
+            reward = 0.0 if terminated else 1.0
         return self._obs(), reward, terminated, truncated, {"frame": self._frame}
+
+    def _potential(self) -> float:
+        """Phi(s): imminence-weighted horizontal clearance to nearest hazard above
+        the player, in [0,1]. 0 when no hazard is within vertical lookahead."""
+        if self._reward_mode != "shaped":
+            return 0.0
+        ranked = self._rank_hazards()
+        if not ranked:
+            return 0.0
+        hx, hy = ranked[0]
+        dy = PLAYER_Y - hy            # >= 0 (ranked hazards are at/above player)
+        imm = 1.0 - dy / SHAPE_IMM_RANGE
+        if imm <= 0.0:
+            return 0.0
+        if imm > 1.0:
+            imm = 1.0
+        safe = abs(hx - self._px) / SHAPE_SAFE_DX
+        if safe > 1.0:
+            safe = 1.0
+        return imm * safe
 
     def _obs(self) -> np.ndarray:
         o = np.zeros(10, dtype=np.float32)

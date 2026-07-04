@@ -47,9 +47,19 @@ def make_env():
     return SignalDodgeFast()
 
 
+def make_train_env(reward_mode: str, shape_coef: float, gamma: float):
+    def _factory():
+        return SignalDodgeFast(
+            reward_mode=reward_mode, shape_coef=shape_coef, shape_gamma=gamma
+        )
+    return _factory
+
+
 def evaluate(model, vecnorm_path: Path, n_seeds: int, base_seed: int,
              max_steps: int = 1800):
-    """Greedy eval on held-out seeds, obs normalized by saved training stats."""
+    """Greedy eval on held-out seeds, obs normalized by saved training stats.
+    Eval is reward-agnostic: it counts survival steps on a reward='none' env, so
+    the shaping only affects TRAINING, never the reported metric."""
     vn = VecNormalize.load(str(vecnorm_path), DummyVecEnv([make_env]))
     vn.training = False
     vn.norm_reward = False
@@ -93,12 +103,16 @@ def main():
     p.add_argument("--ent-coef", type=float, default=0.01)
     p.add_argument("--clip-range", type=float, default=0.2)
     p.add_argument("--lr", type=float, default=3e-4)
+    p.add_argument("--reward-mode", type=str, default="none",
+                   choices=["none", "shaped"])
+    p.add_argument("--shape-coef", type=float, default=0.5)
     args = p.parse_args()
 
     out = Path(args.out_dir)
     out.mkdir(parents=True, exist_ok=True)
 
-    venv = DummyVecEnv([make_env for _ in range(args.n_envs)])
+    train_factory = make_train_env(args.reward_mode, args.shape_coef, args.gamma)
+    venv = DummyVecEnv([train_factory for _ in range(args.n_envs)])
     venv.seed(args.seed)
     venv = VecNormalize(
         venv, norm_obs=True, norm_reward=True, gamma=args.gamma,
@@ -148,6 +162,8 @@ def main():
     summary = {
         "run_id": args.run_id,
         "recipe": "M2.1-verbatim",
+        "reward_mode": args.reward_mode,
+        "shape_coef": (args.shape_coef if args.reward_mode == "shaped" else None),
         "seed": args.seed,
         "steps": args.steps,
         "n_envs": args.n_envs,
