@@ -6,7 +6,7 @@ Canonical handoff document. Updated at the end of every session by whoever execu
 
 **Phase:** Post-Phase-N. Mission env (Signal Dodge, 930.27 bar) reopened via a fast-replica budget experiment. MinAtar adoption banked (3/3 seeds clear).
 
-**Last commit:** `SUBST_HASH` sd-fast replica + budget-at-speed experiment (from-scratch PPO 5M, constant-left collapse)
+**Last commit:** `bf654fa` sd-fast replica + budget-at-speed experiment (from-scratch PPO 5M, constant-left collapse)
 
 **Current task:** MinAtar seed-2 collected (held-out mean 10.967, std 1.741, clears 9.4); 3/3 Breakout seeds clear (11.5 / 14.7 / 10.967, mean-of-means 12.39), recorded in `docs\minatar-adopt-spike-findings.md`. Mission port executed. Godot Signal Dodge measured at 59.8 steps/s (`tools\sd_throughput_probe.py`), which is why every prior from-scratch run capped at ~10k-1M steps. Built a fidelity-validated pure-Python replica `src\sight_agent\rl\sd_fast.py` at 237,910 steps/s (~4000x): replica constant_stay 518.8 matches the geometric analytic ~524; Godot is ~10-15% more collision-forgiving (safe transfer direction). Ran one from-scratch PPO seed at 5M steps (MinAtar recipe verbatim, reward "none") on the replica: collapsed to constant-left (mean 669.93, actions L 1.0 / S 0 / R 0, diversity_ok false), explained_variance ~0 throughout. Corrected read: this is not a clean budget isolation because the MinAtar recipe dropped VecNormalize and used gamma 0.99, both of which Phase M2.1 needed on this env. Evidence: `docs\sd-fast-replica-budget-findings.md`, `runs\sd_fast\*_summary.json` (gitignored).
 
