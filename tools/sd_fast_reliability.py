@@ -40,7 +40,8 @@ RNG = np.random.default_rng(12345)
 
 NONE_RUNS = [f"sd_fast_m21_s{s}_5M" for s in range(5)]
 SHAPED_RUNS = [f"sd_fast_m21sh_s{s}_5M" for s in range(5)]
-ALL_RUNS = NONE_RUNS + SHAPED_RUNS
+CURR_RUNS = [f"sd_fast_m21curr_s{s}_5M" for s in range(5)]
+ALL_RUNS = NONE_RUNS + SHAPED_RUNS + CURR_RUNS
 
 
 def make_env():
@@ -128,37 +129,44 @@ def main():
     data = load_or_eval()
     none = arm_stats(NONE_RUNS, data)
     shaped = arm_stats(SHAPED_RUNS, data)
+    curr = arm_stats(CURR_RUNS, data)
 
     print("\n=== per-seed held-out means (greedy, seeds 5000-5029) ===")
-    print(f"{'seed':>4} {'none':>9} {'shaped':>9}")
+    print(f"{'seed':>4} {'none':>9} {'shaped':>9} {'curr':>9}")
     for i in range(5):
-        print(f"{i:>4} {none['seed_means'][i]:>9.1f} {shaped['seed_means'][i]:>9.1f}")
+        print(f"{i:>4} {none['seed_means'][i]:>9.1f} {shaped['seed_means'][i]:>9.1f} "
+              f"{curr['seed_means'][i]:>9.1f}")
 
     print("\n=== per-arm reliability (Agarwal 2021, seed-level bootstrap) ===")
-    for name, arm in (("none", none), ("shaped", shaped)):
+    for name, arm in (("none", none), ("shaped", shaped), ("curr", curr)):
         print(f"{name:>7}: IQM={arm['iqm']:7.1f}  "
               f"95%CI=[{arm['ci'][0]:.1f}, {arm['ci'][1]:.1f}]  "
               f"clears930={arm['clears']}/5  poolMean={arm['pooled_mean']:.1f}")
 
-    # P(shaped IQM > none IQM): independent paired bootstrap of the two IQMs
-    p_iqm = float((shaped['boot'] > none['boot']).mean())
-    # rliable canonical probability of improvement (Mann-Whitney over run-pairs)
-    poi = prob_of_improvement(shaped['eps'], none['eps'])
-    diff = shaped['iqm'] - none['iqm']
+    def compare(label, exp, base):
+        p_iqm = float((exp['boot'] > base['boot']).mean())
+        poi = prob_of_improvement(exp['eps'], base['eps'])
+        diff = exp['iqm'] - base['iqm']
+        print(f"\n=== comparison: {label} ===")
+        print(f"IQM({label.split(' vs ')[0]}) - IQM({label.split(' vs ')[1]}) = {diff:+.1f}")
+        print(f"P(IQM_exp > IQM_base)  [paired seed bootstrap] = {p_iqm:.3f}")
+        print(f"P(improvement) exp>base [rliable POI]          = {poi:.3f}")
+        return diff, p_iqm, poi
 
-    print("\n=== comparison ===")
-    print(f"IQM(shaped) - IQM(none) = {diff:+.1f}")
-    print(f"P(IQM_shaped > IQM_none)  [paired seed bootstrap] = {p_iqm:.3f}")
-    print(f"P(improvement) shaped>none [rliable POI]          = {poi:.3f}")
-
-    better = (diff > 0) and (p_iqm >= 0.5) and (shaped['clears'] >= none['clears'])
-    print("\n=== verdict ===")
-    if better:
-        print("SHAPED >= NONE on IQM/P(improve)/clear-rate. PBRS holds at 5M; "
-              "next: tune coef 1.0 or port shaped recipe to Godot eval-of-record.")
+    # Headline: the curriculum lever is this session's question.
+    c_diff, c_p_iqm, c_poi = compare("curr vs none", curr, none)
+    curr_better = (c_diff > 0) and (c_p_iqm >= 0.975) and (curr['clears'] >= none['clears'])
+    print("\n=== verdict: curriculum ===")
+    if curr_better:
+        print("CURR > NONE reliably (IQM up, P(IQM)>=0.975, clear-rate >=). "
+              "First reproducible from-scratch clear on sd-fast; port the "
+              "curriculum recipe to a Godot 5M eval-of-record (bar 930.27).")
     else:
-        print("SHAPED NOT BETTER than NONE. PBRS refuted at 5M on sd-fast; "
-              "parked Jeff-owned scope call goes live.")
+        print("CURR NOT reliably better than NONE at 5-seed rliable. Do not "
+              "port yet; inspect per-seed spread and the anneal schedule.")
+
+    # Secondary, kept for the record: shaped vs none (PBRS).
+    compare("shaped vs none", shaped, none)
 
 
 if __name__ == "__main__":

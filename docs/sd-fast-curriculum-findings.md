@@ -35,43 +35,73 @@ Smoke-verified this session: clean-start (curriculum off) obs byte-identical to
 base env; n_init_max=6 injects 6 hazards with no reset collision; live mutation
 of curriculum_n_init reflected in reset; 20k-step end-to-end train+eval ran.
 
-## Result so far (seed 0 of 2)
+## Result: 5-seed arm COMPLETE, judged by rliable
 
-Matched to m21 none seed 0 (same recipe, seed, 5M budget, eval block). Anchor:
-`runs\sd_fast\sd_fast_m21curr_s0_5M_summary.json` (read this session).
+All five curriculum seeds trained (5M, m21-verbatim + start-curriculum) and
+eval'd greedy on the held-out block 5000-5029. The `tools\sd_fast_reliability.py`
+curriculum arm reload-eval reproduced every summary mean exactly (independent
+cross-check, so the summaries are trustworthy). Per-seed held-out means:
 
-| metric | m21 none s0 | curriculum s0 |
-|---|---|---|
-| eval mean (seeds 5000-5029) | 1119.4 | 1743.07 |
-| std | 593.3 | 287.5 |
-| seeds at 1800 cap | (n/a in summary) | 28/30 |
-| action fracs L/S/R | 0.367/0.222/0.411 | 0.396/0.215/0.389 |
-| clears 930.27 bar | yes (mean) | yes, decisively |
+| seed | m21 none | curriculum | curr clears bar? |
+|---|---|---|---|
+| 0 | 1119.4 | 1743.1 | yes (af 0.40/0.22/0.39, diverse) |
+| 1 |  598.0 | 1704.3 | yes (af 0.78/0.13/0.10, skewed but dodging) |
+| 2 |  887.7 |  887.7 | no (collapse) |
+| 3 |  669.9 |  669.9 | no (collapse, below best-constant 746.3) |
+| 4 |  643.1 | 1591.6 | yes (af 0.42/0.20/0.38, diverse) |
 
-Curriculum s0 is the first from-scratch Signal Dodge policy in the project to
-clear the bar at imitation-grade level (1743.07 vs BC replica 1764.6, PPO-ft
-1571.2), with diverse three-way dodging and roughly half the baseline variance.
-Per-seed on the 30 held-out seeds: 28/30 reach the 1800 cap, 29/30 clear the
-930.27 bar; only one seed (length 198) fails. HIGH (anchor: the lengths array in
-the summary json, read this session).
+rliable (Agarwal 2021, seed-level bootstrap, BOOT=50000):
 
-## Status: INTERIM, seed 1 in flight
+| arm | IQM | 95% CI | clears 930 | pool mean |
+|---|---|---|---|---|
+| none | 733.6 | [613.0, 1042.2] | 1/5 | 783.6 |
+| curriculum | 1394.5 | [742.5, 1730.1] | 3/5 | 1319.3 |
 
-Seed 1 (`sd_fast_m21curr_s1_5M`, matched to m21 none s1 baseline 598.0, the
-WEAK baseline seed) launched detached in the same chain and was still training
-at handoff (trainer pid 25072 live, no summary on disk yet). Seed 1 is the real
-test of the lever's variance-reduction claim: baseline s1 was the worst seed
-(598), so lifting it is what would show the curriculum fixes reliability, not
-just luck on an already-decent seed. Do NOT claim the lever succeeds until seed
-1 lands and, ideally, until the arm is extended to >=5 seeds for a run-level
-IQM/CI matched to the from-scratch none arm.
+Comparison curr vs none: IQM diff **+661.0**; P(IQM_curr > IQM_none) [paired seed
+bootstrap] = **0.970**; POI [rliable Mann-Whitney] = **0.743**. HIGH (anchor:
+`tools\sd_fast_reliability.py` output this session; cache
+`runs\sd_fast\reliability_eval_cache.json`).
 
-## Next
+## Verdict: BETTER THAN NONE, NOT YET RELIABLE ENOUGH TO PORT
 
-1. Collect `sd_fast_m21curr_s1_5M_summary.json` when the detached run finishes.
-2. If seed 1 also clears, extend to seeds 2-4 (chain more curriculum runs) for a
-   5-seed arm, then run the rliable IQM/CI/POI vs the m21 none arm (adapt
-   `tools\sd_fast_reliability.py` run lists to include the curriculum arm).
-3. If the 5-seed curriculum arm clears reliably on the replica, THAT is the
-   recipe worth porting to a Godot 5M eval-of-record (bar 930.27), which had
-   been blocked because no from-scratch recipe cleared reproducibly.
+The curriculum is a large, real improvement over the from-scratch none arm (+661
+IQM, P=0.970, 3/5 vs 1/5 clears). But it is NOT reliable in the absolute sense
+the port decision requires. Two of five seeds (s2 887.7, s3 669.9) fall well
+below the 930.27 bar, and the curriculum IQM 95% CI [742.5, 1730.1] straddles
+the bar (lower bound 742.5 < 930.27). The earlier two-seed interim (s0, s1 both
+~1700) overstated reliability: it was a lucky pair. Porting a recipe that fails
+40% of seeds to the expensive Godot 5M eval-of-record would likely reproduce the
+coin-flip there. HOLD the port. (The verdict gate in the harness is
+P(IQM)>=0.975; 0.970 misses it, but the load-bearing reason to hold is the 2/5
+sub-bar seeds and the bar-straddling CI, not the 0.005 threshold gap.)
+
+## Root-cause finding: a shared constant-collapse attractor
+
+Self-audit surfaced that several per-seed length arrays are BYTE-IDENTICAL across
+genuinely different trained models: none-s3, curr-s3, shaped-s0, shaped-s1 all
+produce the exact same 30 episode lengths (mean 669.9), and shaped-s3 differs by
+one step (670.0). Verified against `reliability_eval_cache.json` (element-wise
+equality True). This is not a cache bug; it is a real failure mode: from-scratch
+PPO on Signal Dodge converges, on a subset of seeds, to ONE specific near-constant
+policy that yields ~670 on the held-out block. The failing curriculum seeds (s2
+af 0.06/0.66/0.28, s3 af 0.67/0.23/0.10) are low-entropy and leaning ~66% on a
+single action; the succeeding seeds (s0, s4) sit near 0.40/0.20/0.39. So the wall
+is now VARIANCE: some seeds escape the collapse basin, some do not. The curriculum
+raises the escape rate from 1/5 to 3/5 but does not guarantee escape. HIGH.
+
+## Next: reduce seed variance on the SAME lever (do not abandon it)
+
+found-art verdict ADAPT. Generalized problem: premature entropy collapse into a
+deceptive constant-action basin on a subset of PPO seeds. This is the curriculum
+lever succeeding-but-noisy, not a twice-failed method, so the move is to tune its
+exploration/scaffold knobs, not to switch levers. Un-tried knobs, all inside
+`sd_fast_ppo_curriculum.py` (m21 defaults today): (a) raise/anneal `ent_coef`
+above 0.01 to keep policy entropy up through the anneal window so laggard seeds
+don't collapse when the scaffold is pulled; (b) lengthen `anneal_frac` (0.7 ->
+0.9) or raise `n_init_max` so the curriculum holds longer for slow seeds; (c)
+combine. Pre-register: pick ONE knob first (ent_coef, the most direct anti-collapse
+lever), run the same 5-seed arm, and judge by whether clears goes 3/5 -> 5/5 and
+the IQM CI lower bound clears 930. Only then port to Godot. Search named:
+"PPO entropy collapse premature convergence ent_coef annealing"; prior art is
+standard PPO entropy regularization (Schulman 2017) plus entropy-annealing
+practice. Do NOT open a structurally new lever until this variance knob is judged.
