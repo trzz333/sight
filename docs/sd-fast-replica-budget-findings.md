@@ -395,3 +395,71 @@ direction/scope call reserved to Jeff.
 
 Do NOT launch the Godot 5M eval-of-record: no from-scratch recipe clears the
 replica reproducibly, so there is nothing reliability-worthy to port.
+
+
+---
+
+## Imitation reliability on the replica (readies the scope call)
+
+Tool: `tools/sd_fast_imitation_reliability.py`. Runs the EXISTING Godot-trained
+imitation checkpoints (`bc_policy.pt`, `ppo_ft_policy.pt`, both BCPolicyNet
+schema with baked `feat_mean`/`feat_std`) greedily on the SAME held-out replica
+block the from-scratch eval-of-record used: `SignalDodgeFast(max_steps=1800)`,
+seeds 5000-5029, episode-length metric. No retrain, no new lever, no Godot 5M.
+
+**Can `sd_fast_reliability.py` reload-eval them as-is? No.** That harness
+hard-codes the 10 m21 runs and requires, per model, an SB3 PPO `.zip` plus a
+matching `_vecnormalize.pkl` under `runs\sd_fast\`, then applies
+`VecNormalize.normalize_obs`. The imitation checkpoints are a plain-torch
+BCPolicyNet with a frozen affine normalizer (`(obs-mu)/sd`) and no VecNormalize
+file. found-art verdict **ADAPT**: reuse the repo's own BC loader/normalizer
+(`k5_6_bc_eval_inenv.py`) plus this harness's rliable stat core (IQM, percentile
+bootstrap CI, episode-level POI) on the replica env. No BUILD, no new library.
+
+**Obs parity is the enabling fact (HIGH).** `sd_fast` obs is documented
+byte-identical to Godot `main.gd _h3_build_observation`, and the BC baked mu/sd
+match dim-by-dim: dims 4,7 ~1.0 (hazard present-flags), dims 3,6,9 small-negative
+(dy to hazards above the player), dims 0,1 the player x / last-move pair.
+Empirical cross-check: BC scores mean 1764.6 on the replica seed block vs 1737.3
+on Godot seeds 1000-1009 (within 1.6%), so a Godot-trained policy is in
+distribution here and the replica is a faithful eval surface for it. Residual:
+no live per-step obs diff against a running Godot instance was done.
+
+Result (greedy, seeds 5000-5029, 30 episodes; bar 930.27):
+
+| arm     | IQM    | 95% CI (eval-seed boot) | mean   | min  | max  | clears/30 |
+|---------|--------|-------------------------|--------|------|------|-----------|
+| BC      | 1800.0 | [1800.0, 1800.0]        | 1764.6 | 1037 | 1800 | 30/30     |
+| PPO_ft  | 1738.5 | [1584.6, 1800.0]        | 1571.2 |  302 | 1800 | 28/30     |
+
+From-scratch pooled reference on the same block (episode-level over 150 eps):
+none IQM 654.6, mean 783.6, 47/150 clear; shaped IQM 812.0, mean 925.6, 60/150
+clear. (These are EPISODE-level pooled IQMs. The eval-of-record headline IQMs
+none 733.6 / shaped 741.0 are RUN-level, IQM over the 5 per-run means; both
+reproduced this session, different aggregation, not a contradiction.)
+
+Episode-level probability of improvement (Mann-Whitney, ties 0.5):
+P(BC>none) 0.935, P(BC>shaped) 0.872, P(PPO_ft>none) 0.859, P(PPO_ft>shaped)
+0.787. Imitation beats from-scratch episode-for-episode roughly 79-94% of the
+time and clears the bar on 28-30/30 seeds vs the from-scratch arms' ~31-40%.
+
+**Methodology limit (stated, not hidden).** There is ONE imitation training run
+per arm (seed 0), so the from-scratch arms' 5-training-seed RUN-level IQM/CI is
+NOT matched; what the table reports is a single-policy EVAL-seed distribution
+with an eval-seed bootstrap. The POI axis IS matched (both episode-level). To
+harden into a true run-level arm, retrain BC on >=5 replica seeds (cheap here,
+BC train is minutes); that is the one lever that would make the comparison
+fully symmetric, and it is a technical call, not a scope call.
+
+PPO_ft note: 2 of 30 replica seeds tank (min 302), pulling its mean below BC's;
+IQM (which trims them) stays 1738.5. Consistent with the low-LR finetune having
+nudged the actor off the BC optimum without improving it (K5.6 PPO-finetune
+evidence: matched BC, did not beat it).
+
+Bottom line for the scope call: on the shared replica axis, imitation does not
+merely clear the bar, it dominates from-scratch across every arm and metric.
+This is corroborating evidence for the standing recommendation (accept imitation
+as the mission solution); it does not replace a Godot-side reliability eval if
+Jeff wants one. A Godot 30-seed imitation reliability run (IQM/CI on held-out
+Godot seeds) is the clean, ethics-safe follow-up and does NOT require the
+from-scratch Godot 5M eval-of-record. Direction/scope reserved to Jeff.
