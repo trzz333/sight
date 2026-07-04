@@ -93,3 +93,104 @@ reproduces M2.1's diverse sub-baseline plateau at 5x budget, budget is
 definitively refuted and the wall is the exploration/credit structure
 (critic blind to death-timing from the 3-hazard obs), redirecting the next
 lever off budget entirely.
+
+
+## Result: clean isolation (M2.1 recipe, 5M) CLEARS the replica bar
+
+Evidence: `runs\sd_fast\sd_fast_m21_s0_5M_summary.json`, per-seed dump via
+`tools\sd_fast_eval_dump.py`, train log `runs\sd_fast\m21_s0_5M.log`
+(all gitignored under runs\).
+
+One from-scratch PPO seed, M2.1 recipe verbatim (read from
+`tools\m2_state_ppo_train.py`): gamma 0.999, gae 0.95, n_steps 512, batch 512,
+n_epochs 10, clip 0.2, ent_coef 0.01, lr 3e-4, vf_coef default 0.5, 8 envs,
+MlpPolicy [64,64], VecNormalize(norm_obs+norm_reward, gamma 0.999, clip 10/10).
+Reward "none". 5,000,000 steps. Eval greedy over held-out seeds 5000-5029, obs
+normalized through the saved vecnormalize stats (training=False).
+
+Held-out distribution (30 seeds), sorted:
+195, 227, 374, 378, 436, 466, 527, 527, 528, 648, 706, 735, 826, 1006, 1052,
+1066, 1215, 1532, 1545, 1606, 1787, 1800 x9.
+
+- mean 1119.4, median 1059.0, IQM 1148.7, std 593.3, min 195, max 1800.
+- actions L 0.367 / S 0.222 / R 0.411. diversity_ok TRUE.
+- 30% of episodes hit the 1800 cap (perfect survival); 40% still die below
+  best-constant 746 (policy is bimodal, real dodging but not yet robust).
+- explained_variance healthy through training (0.85 early, bouncing 0.1-0.85
+  later as normalized-return variance shrinks; value_loss small, not the M2
+  EV~0 defect). No constant-action collapse (contrast the MinAtar-recipe run).
+
+Verdict: budget was the wall. IQM 1148.7 vs M2.1's IQM 418 (same recipe, 1M,
+Godot) is ~2.7x and clears the 930.27 bar on mean, median, AND IQM. The M2.1
+recipe was sound and starved at 1M by Godot's 60 steps/s throughput. At 5M on
+the fidelity-validated replica the identical recipe learns diverse dodging.
+First from-scratch clear of Signal Dodge in project history. Confidence HIGH
+on the replica clear (disk summary + reproducible reload-eval).
+
+Caveats: (1) one training seed; seeds 1 and 2 launched to confirm reproducibility
+(`runs\sd_fast\m21_s{1,2}_5M.log`, sentinel `m21_confirm.sentinel`). (2) The
+replica is not the eval of record. The 930.27 bar is Godot; the replica is
+~10-15% more collision-forgiving (safe direction for dodging transfer, but
+survival lengths do not map 1:1). The eval of record is a Godot 5M run of this
+recipe.
+
+## Next
+
+1. Confirm replica reproducibility across seeds 1 and 2 (in flight). Record the
+   3-seed IQM spread here.
+2. Port the M2.1 recipe to a Godot 5M run for the eval of record vs 930.27.
+   Cost note: Godot ~60 steps/s single-env means 5M is long (hours to ~a day
+   depending on 8-worker aggregate throughput), and Phase M saw Godot worker
+   crashes, so the Godot run needs an SB3 CheckpointCallback + resume so a
+   mid-run crash does not lose the whole run. Build that before launching.
+
+
+## Seed reproducibility: the clear is NOT robust (correction to the section above)
+
+The "CLEARS" section above reports seed 0 only and overstated the verdict.
+Confirmation seeds were run. Evidence: `sd_fast_m21_s{0,1}_5M_summary.json`.
+
+| seed | mean | LSR actions            | diversity_ok | beats 746 | EV    | verdict |
+|------|-----:|------------------------|--------------|-----------|-------|---------|
+| 0    | 1119 | 0.367 / 0.222 / 0.411  | true         | yes       | ~0.85 | CLEAR (IQM 1148.7) |
+| 1    |  598 | 0.863 / 0.064 / 0.073  | true*        | no        | 0.885 | FAIL (near constant-left) |
+| 2    |  ?   | in flight (~0.5M/5M)    | ?            | ?         | ?     | pending |
+
+*seed 1 max-frac 0.863 passes the <0.97 gate but is functionally
+constant-left; the gate is too loose to catch an 86%-pinned policy.
+
+Corrected verdict, confidence MEDIUM: budget lifts the CEILING but does not
+buy RELIABILITY. Seed 0 is the first from-scratch policy in project history to
+clear the Signal Dodge dodging bar (on the replica), so a from-scratch clear is
+now demonstrably reachable at 5M, which was never true at 1M. But seed 1
+collapsed to the same constant-left attractor Phase G/K/M hit, with an equally
+healthy critic (EV 0.885), so 5M does not make from-scratch reliable seed to
+seed. This matches the standing project finding: imitation clears reliably
+(BC 1737, PPO-finetune 1710); from-scratch reliability is the open problem, and
+5x budget did not close it.
+
+Note the critic is healthy in BOTH the clear and the failure (EV 0.85-0.89), so
+the wall is not critic capacity or credit assignment. It is exploration: which
+basin the policy falls into is seed-luck, and the constant-left basin is a deep
+local optimum the entropy bonus (0.01) does not reliably escape.
+
+## Next (revised)
+
+The lever is reliability, not ceiling or budget. Two structurally different
+routes, both off the budget axis:
+
+1. Exploration pressure against the constant-action basin. Higher/scheduled
+   ent_coef, or an intrinsic-exploration method (RND / NoisyNets, both already
+   in-repo: `noisy_qrdqn.py`, `dyn_qrdqn.py`), or a tightened diversity gate as
+   an early-stop/restart signal. found-art before building: RND (Burda 2018)
+   and NoisyNets (Fortunato 2017) are the standard escapes; check the existing
+   in-repo QR-DQN variants first.
+2. Accept imitation as the standing solution (BC/PPO-finetune already clear
+   reliably at ~1710-1737) and treat from-scratch reliability as a separate
+   research thread rather than the mission-critical path. This is a Jeff-facing
+   scope call, not a technical fork.
+
+Do NOT launch the Godot 5M eval-of-record yet: porting a seed-lucky recipe that
+clears 1-of-2 to a ~day-long Godot run is premature. Establish replica
+reliability (or a restart-on-collapse protocol) first, then port a recipe that
+clears reproducibly.
