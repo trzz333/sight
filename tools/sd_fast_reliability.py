@@ -41,6 +41,8 @@ RNG = np.random.default_rng(12345)
 NONE_RUNS = [f"sd_fast_m21_s{s}_5M" for s in range(5)]
 SHAPED_RUNS = [f"sd_fast_m21sh_s{s}_5M" for s in range(5)]
 CURR_RUNS = [f"sd_fast_m21curr_s{s}_5M" for s in range(5)]
+# Optional gamma-0.99 variance-reduction arm; judged only once all 5 exist.
+CURR_G99_RUNS = [f"sd_fast_m21curr_g99_s{s}_5M" for s in range(5)]
 ALL_RUNS = NONE_RUNS + SHAPED_RUNS + CURR_RUNS
 
 
@@ -167,6 +169,37 @@ def main():
 
     # Secondary, kept for the record: shaped vs none (PBRS).
     compare("shaped vs none", shaped, none)
+
+    # Optional gamma-0.99 arm: judged only when all 5 models are on disk.
+    if all(os.path.exists(f"{OUT}\\{r}.zip")
+           and os.path.exists(f"{OUT}\\{r}_vecnormalize.pkl") for r in CURR_G99_RUNS):
+        cache = json.load(open(CACHE)) if os.path.exists(CACHE) else {}
+        for r in CURR_G99_RUNS:
+            if r not in cache:
+                print(f"  eval {r} ...", flush=True)
+                cache[r] = eval_run(r)
+                json.dump(cache, open(CACHE, "w"), indent=0)
+            data[r] = np.array(cache[r], dtype=float)
+        g99 = arm_stats(CURR_G99_RUNS, data)
+        print("\n=== gamma-0.99 arm (variance-reduction lever) ===")
+        print(f"  per-seed: {[round(float(m),1) for m in g99['seed_means']]}")
+        print(f"    g99: IQM={g99['iqm']:7.1f}  95%CI=[{g99['ci'][0]:.1f}, "
+              f"{g99['ci'][1]:.1f}]  clears930={g99['clears']}/5  "
+              f"poolMean={g99['pooled_mean']:.1f}")
+        gd, gp, _ = compare("g99 vs none", g99, none)
+        compare("g99 vs curr", g99, curr)
+        # Port gate: reliable clear above the bar, not just better than none.
+        port_ok = (g99['clears'] >= 5) and (g99['ci'][0] > BAR)
+        print("\n=== verdict: gamma-0.99 ===")
+        if port_ok:
+            print("G99 clears 5/5 and IQM CI lower bound is above the bar. "
+                  "Reliable from-scratch recipe; PORT to Godot 5M eval-of-record.")
+        else:
+            print(f"G99 not yet port-reliable (clears={g99['clears']}/5, "
+                  f"CI_lo={g99['ci'][0]:.1f} vs bar {BAR}). Inspect per-seed "
+                  "spread; consider anneal_frac or n_init_max next.")
+    else:
+        print("\n[gamma-0.99 arm not yet on disk; skipping]")
 
 
 if __name__ == "__main__":

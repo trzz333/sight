@@ -83,25 +83,48 @@ produce the exact same 30 episode lengths (mean 669.9), and shaped-s3 differs by
 one step (670.0). Verified against `reliability_eval_cache.json` (element-wise
 equality True). This is not a cache bug; it is a real failure mode: from-scratch
 PPO on Signal Dodge converges, on a subset of seeds, to ONE specific near-constant
-policy that yields ~670 on the held-out block. The failing curriculum seeds (s2
-af 0.06/0.66/0.28, s3 af 0.67/0.23/0.10) are low-entropy and leaning ~66% on a
-single action; the succeeding seeds (s0, s4) sit near 0.40/0.20/0.39. So the wall
-is now VARIANCE: some seeds escape the collapse basin, some do not. The curriculum
-raises the escape rate from 1/5 to 3/5 but does not guarantee escape. HIGH.
+policy that yields ~670 on the held-out block. So the wall is VARIANCE: some
+seeds escape the basin, some do not. The curriculum raises the escape rate from
+1/5 to 3/5 but does not guarantee escape. HIGH.
 
-## Next: reduce seed variance on the SAME lever (do not abandon it)
+## Mechanism: NOT entropy collapse (hypothesis tested and REFUTED)
 
-found-art verdict ADAPT. Generalized problem: premature entropy collapse into a
-deceptive constant-action basin on a subset of PPO seeds. This is the curriculum
-lever succeeding-but-noisy, not a twice-failed method, so the move is to tune its
-exploration/scaffold knobs, not to switch levers. Un-tried knobs, all inside
-`sd_fast_ppo_curriculum.py` (m21 defaults today): (a) raise/anneal `ent_coef`
-above 0.01 to keep policy entropy up through the anneal window so laggard seeds
-don't collapse when the scaffold is pulled; (b) lengthen `anneal_frac` (0.7 ->
-0.9) or raise `n_init_max` so the curriculum holds longer for slow seeds; (c)
-combine. Pre-register: pick ONE knob first (ent_coef, the most direct anti-collapse
-lever), run the same 5-seed arm, and judge by whether clears goes 3/5 -> 5/5 and
-the IQM CI lower bound clears 930. Only then port to Godot. Search named:
-"PPO entropy collapse premature convergence ent_coef annealing"; prior art is
-standard PPO entropy regularization (Schulman 2017) plus entropy-annealing
-practice. Do NOT open a structurally new lever until this variance knob is judged.
+The first-pass guess (premature entropy collapse, fix by raising ent_coef) was
+FALSIFIED by a direct probe. Loaded the trained policies and measured mean policy
+entropy over a 2000-state batch (nats, max 1.099): good seeds s0 0.552, s4 0.669;
+failing seeds s2 0.639, s3 0.756. The WORST performer (s3, 670) has the HIGHEST
+entropy of all. The failing policies are not more deterministic than the winners,
+so an entropy bonus targets the wrong mechanism. This is why introspection is not
+verification: the "collapse" read came from skewed action fractions, but skewed
+argmax-in-rollout does not imply low per-state entropy. Corrected picture:
+multi-modal convergence. Seeds settle into different policy basins and only some
+basins dodge competently (winners go L-heavy and diverse; s2 went R-heavy, s3
+stayed spread and never commits). It is an optimization / credit-assignment
+variance problem. HIGH (anchor: probe this session; entropy numbers above).
+
+found-art (search "PPO high seed variance reduce reliability, some seeds converge
+good others fail"): the reliability wall for sparse long-horizon PPO is
+value-estimation variance, converged across independent sources. arXiv 2301.05104:
+sparse reward -> the critic never gets good value estimates for the rare good
+states -> high-variance policy training. arXiv 2311.02129: reports the exact
+"dichotomous convergence" (a performant group and a failed group of seeds).
+arXiv 2111.04504: the lock-in mechanism, early noisy advantages boost one action
+and it runs away. This recipe runs gamma 0.999 (effective horizon ~1000) on an
+1800-step survival task, so the critic must regress near-undiscounted survival
+~1000 steps out (VecNormalize also normalizes returns with gamma 0.999), a large
+early-variance source. Verdict ADAPT: cut the discount, not the exploration.
+
+## Next: gamma-0.99 variance-reduction arm (IN FLIGHT)
+
+One-knob change on the same curriculum scaffold: `--gamma 0.99` (effective horizon
+~1000 -> ~100 steps), which is plenty for a reactive dodging task and sharply
+lowers value-target variance. Not a twice-failed lever (those were CMA-ES,
+CMA-MAE, elite-BC, budget 5M, NoisyNet, PBRS reward geometry); the discount is
+none of them. 5-seed arm `sd_fast_m21curr_g99_s{0..4}_5M` launched detached this
+session (chain log `runs\sd_fast\curr_g99_chain.log`), gamma 0.99, everything
+else m21 + curriculum verbatim. Judge with `tools\sd_fast_reliability.py` (the
+g99 arm is wired in, guarded on all 5 models being on disk; port gate = clears
+5/5 AND IQM CI lower bound > 930.27). If g99 clears reliably, port to a Godot 5M
+eval-of-record. If it lifts but is still short, next un-tried knobs are
+`anneal_frac` 0.7 -> 0.9 or higher `n_init_max` (hold the scaffold longer for
+slow seeds). The retired ent_coef idea is NOT the next move; the probe refuted it.
