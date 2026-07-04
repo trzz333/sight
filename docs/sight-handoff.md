@@ -4,20 +4,20 @@ Canonical handoff document. Updated at the end of every session by whoever execu
 
 ---
 
-**Phase:** Post-Phase-N. MinAtar adoption spike (Jeff-approved next target environment). Signal Dodge mission still open.
+**Phase:** Post-Phase-N. Mission env (Signal Dodge, 930.27 bar) reopened via a fast-replica budget experiment. MinAtar adoption banked (3/3 seeds clear).
 
-**Last commit:** `9144198` MinAtar ADOPT spike: first from-scratch clear (SB3 PPO Breakout)
+**Last commit:** `SUBST_HASH` sd-fast replica + budget-at-speed experiment (from-scratch PPO 5M, constant-left collapse)
 
-**Current task:** First from-scratch clear in project history is banked. SB3 2.8.0 PPO with the Young & Tian small CNN (custom SB3 extractor) learns MinAtar/Breakout-v1 from scratch over 5M steps. Held-out eval is the deterministic policy over seeds 1000-1009 range (1000-1029, disjoint from the seed-0..2 training envs): seed 0 mean 11.5 (std 4.08), seed 1 mean 14.7 (std 4.49), both clearing the ~9.4 published-scale bar; seed 2 is still training in the background at handoff time. Random-policy floor is 0.333. Throughput ~5.8-6.1k steps/s on CPU (8 envs), full 5M run ~14 min, so no overnight detached infra is needed. All numbers anchored to `runs\minatar\*_summary.json` and rev-parse this session. Findings written to `docs\minatar-adopt-spike-findings.md`.
+**Current task:** MinAtar seed-2 collected (held-out mean 10.967, std 1.741, clears 9.4); 3/3 Breakout seeds clear (11.5 / 14.7 / 10.967, mean-of-means 12.39), recorded in `docs\minatar-adopt-spike-findings.md`. Mission port executed. Godot Signal Dodge measured at 59.8 steps/s (`tools\sd_throughput_probe.py`), which is why every prior from-scratch run capped at ~10k-1M steps. Built a fidelity-validated pure-Python replica `src\sight_agent\rl\sd_fast.py` at 237,910 steps/s (~4000x): replica constant_stay 518.8 matches the geometric analytic ~524; Godot is ~10-15% more collision-forgiving (safe transfer direction). Ran one from-scratch PPO seed at 5M steps (MinAtar recipe verbatim, reward "none") on the replica: collapsed to constant-left (mean 669.93, actions L 1.0 / S 0 / R 0, diversity_ok false), explained_variance ~0 throughout. Corrected read: this is not a clean budget isolation because the MinAtar recipe dropped VecNormalize and used gamma 0.99, both of which Phase M2.1 needed on this env. Evidence: `docs\sd-fast-replica-budget-findings.md`, `runs\sd_fast\*_summary.json` (gitignored).
 
-**Next action:** Collect the seed-2 summary (`runs\minatar\ppo_Breakout-v1_s2_full_summary.json`) and record the 3-seed spread in `docs\minatar-adopt-spike-findings.md`. Then port the MinAtar lesson back to the mission: redesign Signal Dodge's reward toward dense per-step credit (the diagnosed Phase N wall, since a constant action already survives ~930 steps) and run one from-scratch PPO seed on the redesigned env. Freeway as a second MinAtar confirmation game is the fallback only if the Signal Dodge redesign stalls. Technical call, Claude's to make, no Jeff gate.
+**Next action:** Run the clean budget isolation with `tools\sd_fast_ppo.py` extended to Phase M2.1's exact recipe (reward none, gamma 0.999, VecNormalize(norm_obs+norm_reward), ent_coef 0.01, 8 envs, MlpPolicy [64,64]) at 5M steps, one seed, eval greedy on replica held-out seeds 5000-5029. If it clears the replica dodging bar with diverse actions, port to a Godot 5M run for the eval of record. If it reproduces M2.1's diverse sub-baseline plateau at 5x budget, budget is refuted and the wall is the exploration/credit structure (critic blind to death-timing from the 3-hazard obs); redirect off budget.
 
 **Blockers:** None requiring Jeff.
 
 **Notes:**
 
-- Anchors: seed summaries in `runs\minatar\` (gitignored). seed0 11.5, seed1 14.7 held-out both clear 9.4; seed2 in flight at handoff. Random floor 0.333. HEAD `9144198`.
-- Cross-env read: the same stack that went 0/5 from scratch on Signal Dodge (best held-out 906.4 vs 930.27 bar) clears MinAtar Breakout from scratch. Wall relocated to Signal Dodge's own design (thin learnable signal), not an infra or method incapacity.
-- Reusable: `src\sight_agent\rl\minatar.py` (gymnasium env layer + Young & Tian CNN extractor), `tools\minatar_ppo_spike.py` (trainer + held-out eval), `tools\minatar_sanity.py` (random floor).
-- found-art: mainline `minatar` 1.0.15 is gymnasium-native, so the rlai-lab MinAtar-Faster fork was not needed. ADOPT mainline; CNN is ADAPT (Young & Tian 2019 / qlan3 gym-games).
-- Honesty: Breakout-v1 uses the minimal 3-action set and PPO is not the paper's AC/Q, so 9.4 is a reference bar. The from-scratch clear is real (HIGH); byte-exact reproduction of the paper protocol is not claimed (LOW).
+- The fast replica is a validated same-game reimplementation, not a new target environment (no Jeff gate). Eval of record stays Godot vs the 930.27 bar.
+- Refuted this session: "a constant action already survives ~930." Best constant is 845.7 (Godot, K5.2); 930.27 = 845.7 x 1.10, set above best-constant so clearing it requires real dodging. Dense reward shaping was already tried (K5.5 alpha 0.30) and backfired by rewarding wall-hugging; reward stays "none".
+- Prior from-scratch ceiling: Phase M2.1 (Godot, 1M, VecNormalize, healthy critic EV 0.85-0.94, diverse actions) IQM 418, CI [314,670] < bar. My 5M replica run's collapse is a critic/gamma artifact, not a budget verdict; the M2.1-recipe 5M control settles it.
+- Imitation still clears reliably (BC 1737.3, PPO-finetune 1710.5). Mission is met by imitation; the open problem is from-scratch reliability.
+- Anchors: `sd_fast_s0_5M_summary.json` (mean 669.93, L1.0), throughput probes in session log, `docs\sd-fast-replica-budget-findings.md`. HEAD after chore commit below.

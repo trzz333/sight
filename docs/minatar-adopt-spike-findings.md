@@ -45,18 +45,20 @@ MinAtar compute-limited from-scratch baselines; SB3-compatible MinAtar fork.
 | seed | held-out mean | std | clears 9.4 | train s | steps/s |
 |------|---------------|-----|-----------|---------|---------|
 | 0    | 11.5          | 4.08 | yes      | 863.7   | 5789    |
-| 1    | 14.7          | 4.49 | yes      | 828.3   | ~6000   |
-| 2    | in flight     | -    | -        | -       | -       |
+| 1    | 14.7          | 4.49 | yes      | 828.3   | 6037    |
+| 2    | 10.967        | 1.74 | yes      | 784.6   | 6373    |
 
-2/2 completed seeds clear. Seed 2 running at write time; collect next session.
-Throughput ~5.8-6.1k steps/s on CPU, 8 envs; full 5M run ~14 min. Overnight
+3/3 seeds clear. Spread: mean-of-means 12.39, range 10.97-14.70, all above the
+9.4 bar and ~33x the random floor (0.333). Seed 2 is the tightest (std 1.74),
+seeds 0-1 wider (std ~4.1-4.5); the bar is cleared on every seed regardless.
+Throughput 5.8-6.4k steps/s on CPU, 8 envs; full 5M run 13-14 min. Overnight
 detached infra not needed for MinAtar.
 
 ## Confidence
 
 - Infra learns a published-benchmark game from scratch, reproducibly, on
-  held-out seeds, above a published-scale bar: HIGH (two independent seeds, disk
-  summaries, disjoint eval seeds).
+  held-out seeds, above a published-scale bar: HIGH (three independent seeds,
+  disk summaries, disjoint eval seeds, 3/3 clear).
 - Byte-exact reproduction of the Young & Tian protocol: LOW. Breakout-v1 uses
   the minimal 3-action set and PPO is a different algorithm family than the
   paper's AC/Q. 9.4 is a reference bar, not an identical-protocol target. The
@@ -81,7 +83,10 @@ rather than a sixth from-scratch method on the unchanged env.
 
 ## Next
 
-1. Collect seed 2; record 3-seed spread.
-2. Decide Signal Dodge reward/observation redesign informed by the MinAtar
-   contrast (dense per-step credit), OR establish MinAtar Freeway as a second
-   confirmation game. Technical call, mine to make next session.
+1. Seed 2 collected; 3-seed spread recorded above. DONE.
+2. Signal Dodge reward redesign toward dense per-step credit is the chosen next
+   lever (over a second MinAtar confirmation game): the diagnostic value of a
+   third MinAtar clear is near zero once 3/3 seeds clear, whereas the mission bar
+   (930.27 on Signal Dodge, still open) is where progress must come from. Freeway
+   remains the fallback only if the redesign stalls. See
+   `signal-dodge-reward-redesign.md`.
