@@ -6,7 +6,7 @@ Canonical handoff document. Updated at the end of every session by whoever execu
 
 **Phase:** Post-Phase-N. Signal Dodge (930.27 bar) open. Scope call RULED (Jeff): keep pursuing from-scratch. First from-scratch reliable clear achieved via a start-state curriculum.
 
-**Last commit:** `<PENDING>` sd-fast: start-state curriculum lever, from-scratch seed 0 clears the bar (1743.07)
+**Last commit:** `7e7a102` sd-fast: start-state curriculum lever, from-scratch seed 0 clears the bar (1743.07)
 
 **Current task:** New from-scratch lever is live and positive on seed 0. `tools\sd_fast_ppo_curriculum.py` runs the m21 recipe verbatim plus a start-state curriculum: a `CurriculumSDF` subclass of `SignalDodgeFast` (base env byte-identical, eval harness and imitation number untouched) injects `curriculum_n_init` hazards above the player at reset (headroom 100px, no reset collision), and `AnnealCurriculum` anneals that count 6 -> 0 over the first 70% of training so the run ends on the true clean-start distribution. Reward "none", eval unchanged (greedy, held-out seeds 5000-5029, via `sd_fast_ppo.evaluate`), so numbers are directly comparable to the m21 none arm. Matched seed-0 result (anchor `runs\sd_fast\sd_fast_m21curr_s0_5M_summary.json`, read this session): eval mean 1743.07 vs m21 none s0 1119.4, std 287.5 vs 593.3, 28/30 seeds at the 1800 cap, 29/30 clear the bar, action fracs 0.396/0.215/0.389 (diverse three-way dodging). This is the first from-scratch Signal Dodge policy in the project to clear at imitation grade (BC replica 1764.6, PPO-ft 1571.2). INTERIM: one seed. found-art ADAPT (curriculum learning Bengio 2009 / reset-state Go-Explore Ecoffet 2019 / arXiv 2410.16790; web search named in `docs\sd-fast-curriculum-findings.md`).
 
