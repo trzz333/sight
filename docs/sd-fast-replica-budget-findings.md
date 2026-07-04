@@ -319,3 +319,79 @@ multi-task) the stratified bootstrap reduces to ordinary seed-level resampling.
 Control arm firmed to n=5 (reward none, 5M, mean_len): s0 1119 CLEAR, s1 598,
 s2 888, s3 670, s4 643. Reward=none clears ~1/5 by mean. This is the baseline
 the shaped arm (seeds 0-4, in flight) must beat on clear-rate / IQM / P(improve).
+
+
+## Result: none vs shaped at 5M, PBRS does NOT lift reliability (eval of record)
+
+Evidence: `tools\sd_fast_reliability.py` output, cache
+`runs\sd_fast\reliability_eval_cache.json` (gitignored), the ten
+`sd_fast_m21{,sh}_s{0..4}_5M_summary.json`. Sentinel
+`runs\sd_fast\shaped_sweep.sentinel` = CHAIN_DONE. All 10 models reload-eval'd
+greedily on held-out seeds 5000-5029, obs through each run's saved VecNormalize
+stats. Methodology: rliable (Agarwal 2021) ported to numpy, single-env so the
+stratified bootstrap is seed-level resampling.
+
+Per-seed held-out mean (greedy, seeds 5000-5029):
+
+| seed | none  | shaped |
+|------|------:|-------:|
+| 0    | 1119.4 | 669.9 |
+| 1    |  598.0 | 669.9 |
+| 2    |  887.7 | 883.1 |
+| 3    |  669.9 | 670.0 |
+| 4    |  643.1 | 1735.1 |
+
+Per-arm (seed-level bootstrap, 50k resamples):
+
+| arm    | IQM   | 95% CI          | clears 930 | pool mean |
+|--------|------:|-----------------|:----------:|----------:|
+| none   | 733.6 | [613.0, 1042.2] | 1/5        | 783.6     |
+| shaped | 741.0 | [669.9, 1451.1] | 1/5        | 925.6     |
+
+IQM(shaped) - IQM(none) = +7.4 (~1%). P(IQM_shaped > IQM_none) = 0.607 (paired
+seed bootstrap). rliable POI (Mann-Whitney over run-pairs) = 0.569.
+
+Verdict, confidence HIGH: PBRS at 5M does NOT lift reliability over reward=none.
+Clear-rate is tied at 1/5. The IQM edge is +1% with 95% CIs that overlap almost
+completely ([613,1042] vs [669.9,1451]), and POI 0.569 is a hair off a coin
+flip. The script's built-in binary printed "SHAPED >= NONE, PBRS holds" on a
+mechanical diff>0 test; that test is too permissive and is overridden here on
+the evidence. Shaping's stated job was to raise the fraction of seeds that clear
+the bar. It did not: 1/5 either way.
+
+Mechanism notes (evidence: `tools\_probe_shaped_collapse.py`, reload-eval
+arrays):
+- shaped s0 and s1 produce byte-identical held-out length distributions
+  (mean/std/min/max all 669.93/432.14/182/1800) despite DIFFERENT greedy action
+  sequences (s0 alternates R/L, s1 goes all-Left then Stay, verified on seed
+  5000, sequences not equal). The shaped policies are too weak to change the
+  fatal-hazard timing, so death step is seed-locked and identical across two
+  different weak policies. Not a seeding bug (train_seconds/EV/action-mix differ)
+  and not an eval bug (the none arm and the two shaped action sequences all
+  separate cleanly).
+- shaped's higher pool mean (925.6) is carried entirely by one lucky seed,
+  s4 = 1735.1, which IQM trims out. none's lone clearer (s0 = 1119) is trimmed
+  the same way. Neither arm clears reliably.
+
+Lateral audit: reward-geometry engineering for from-scratch reliability has now
+failed twice on this env: K5.5-era dense clearance shaping backfired into
+wall-hugging, and potential-based shaping at a real coefficient and real budget
+(5M) shows no reliability lift. Method failed twice, so the lever changes. It is
+NOT "PBRS coef 1.0" and NOT "port shaped to Godot" (both are retrying reward
+shaping harder). Exploration was already refuted separately (K5.8 NoisyNet 1/10).
+
+## Scope call is live (Jeff-owned)
+
+The from-scratch reliability program has now exhausted its pre-registered
+levers: Phase N (CMA-ES, CMA-MAE, elite-BC, all FINAL NEGATIVE), budget
+isolation (1/5 clear at 5M), exploration (K5.8, 1/10), and reward geometry
+(this result, no lift). Imitation clears reliably every time (BC 1737.3,
+PPO-finetune 1710.5). Per the handoff's parked decision, the scope call goes
+live: keep pursuing from-scratch reliability on a new lever, or accept imitation
+as the standing mission solution. Recommendation (earned, not a menu): accept
+imitation as the standing solution, because from-scratch reliability has failed
+across every lever tried while imitation clears reliably. This is a
+direction/scope call reserved to Jeff.
+
+Do NOT launch the Godot 5M eval-of-record: no from-scratch recipe clears the
+replica reproducibly, so there is nothing reliability-worthy to port.
