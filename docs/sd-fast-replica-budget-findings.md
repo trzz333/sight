@@ -289,3 +289,33 @@ stays byte-identical (dynamics verified identical across 20 seeds,
 on the replica, compare CLEAR-RATE, not single-seed ceiling.
 
 Do NOT launch the Godot 5M eval-of-record: still 1/3 on the replica.
+
+
+## found-art fix (external search, invoked /found-art): eval methodology was hand-rolled
+
+Last session's found-art was in-repo only. External search run this session:
+- Consensus "potential-based reward shaping policy invariance": Ng/Harada/Russell
+  1999 is canonical (2947 cites); PBRS is the only additive form that provably
+  preserves the optimal policy. Refinements exist (Muller 2025 initial-Q
+  dependence; Devlin 2011-12; Bootstrapped Reward Shaping 2025 value-fn-as-
+  potential) and confirm PBRS "affects exploration and can alter the policy
+  converged upon" while leaving the optimum invariant, which is exactly the
+  reliability mechanism intended. Verdict on the shaping: ADAPT stands, the
+  replica implementation is correct, no rebuild.
+- web + PyPI: `rliable` (Agarwal et al., NeurIPS'21 Outstanding Paper) is the
+  field standard for reliability with a handful of seeds: IQM, stratified
+  bootstrap 95% CIs, probability of improvement. My `tools\sd_fast_iqm_spread.py`
+  hand-rolls IQM and I reported "1/3 clears" as a point estimate on 5 seeds,
+  the exact few-run point-estimate trap that library exists to fix.
+
+Verdict on eval: ADAPT rliable's methodology, not the package. The packaged
+`rliable` does NOT install on this box (Python 3.14): its dep `arch` builds a C
+extension and there is no MSVC compiler here (install attempted this session,
+failed on `arch.univariate.recursions`). So next session compute per-arm IQM +
+percentile bootstrap 95% CI over seeds + P(shaped IQM > none IQM), in the
+numpy/scipy already present, citing Agarwal et al. 2021. For a single env (not
+multi-task) the stratified bootstrap reduces to ordinary seed-level resampling.
+
+Control arm firmed to n=5 (reward none, 5M, mean_len): s0 1119 CLEAR, s1 598,
+s2 888, s3 670, s4 643. Reward=none clears ~1/5 by mean. This is the baseline
+the shaped arm (seeds 0-4, in flight) must beat on clear-rate / IQM / P(improve).
