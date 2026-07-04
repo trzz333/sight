@@ -87,6 +87,7 @@ def _git(*args: str, capture: bool = False, check: bool = True) -> subprocess.Co
         cwd=REPO,
         capture_output=True,
         text=True,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
     if check and cp.returncode != 0:
         raise HandoffError(

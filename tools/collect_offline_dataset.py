@@ -369,7 +369,8 @@ def run_trainer(npz_path: Path, out: Path, args) -> dict:
     ]
     print(f"[train] -> {' '.join(cmd)}", flush=True)
     t0 = time.monotonic()
-    proc = subprocess.run(cmd, cwd=str(REPO_ROOT), capture_output=True, text=True)
+    proc = subprocess.run(cmd, cwd=str(REPO_ROOT), capture_output=True, text=True,
+                          creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     print(proc.stdout[-4000:] if proc.stdout else "", flush=True)
     if proc.returncode != 0:
         print("[train] STDERR", proc.stderr[-4000:], flush=True)

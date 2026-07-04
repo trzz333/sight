@@ -69,6 +69,11 @@ __all__ = ["GodotSignalDodgeEnv", "DEFAULT_MAX_STEPS"]
 # override; the constructor accepts any positive int.
 DEFAULT_MAX_STEPS: int = 1800
 
+# Windows: spawn Godot with CREATE_NO_WINDOW so worker/eval launches from a
+# windowless (detached) parent do not flash a console window per worker and per
+# restart. Resolves to 0 (no-op) on non-Windows platforms.
+_CREATE_NO_WINDOW: int = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
 # Per-attempt TCP connect timeout. The env retries inside the larger
 # ``connect_timeout_s`` budget while waiting for Godot to start listening.
 _CONNECT_RETRY_INTERVAL_S: float = 0.1
@@ -946,4 +951,10 @@ def _default_process_factory(
     stdout: Any = None,
     stderr: Any = None,
 ) -> subprocess.Popen:
-    return subprocess.Popen(cmd, env=env, stdout=stdout, stderr=stderr)
+    return subprocess.Popen(
+        cmd,
+        env=env,
+        stdout=stdout,
+        stderr=stderr,
+        creationflags=_CREATE_NO_WINDOW,
+    )

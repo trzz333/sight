@@ -50,6 +50,7 @@ def _short_git_commit() -> str | None:
         out = subprocess.run(
             ["git", "rev-parse", "--short", "HEAD"], cwd=str(REPO_ROOT),
             capture_output=True, text=True, timeout=5,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
         return out.stdout.strip() or None if out.returncode == 0 else None
     except (FileNotFoundError, subprocess.TimeoutExpired, OSError):

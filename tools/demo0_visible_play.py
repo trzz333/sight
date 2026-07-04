@@ -58,6 +58,7 @@ def _short_git_commit() -> str | None:
             capture_output=True,
             text=True,
             timeout=5,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
         if out.returncode == 0:
             return out.stdout.strip() or None

@@ -105,7 +105,8 @@ def launch_train(seed):
     log("LAUNCH seed-%d training (iters=%s bc_epochs=%s)" % (seed, ITERS, BC_EPOCHS))
     subprocess.call([VENV_PY, TRAIN_LAUNCH, str(seed), ITERS, BC_EPOCHS],
                     stdout=open(LOG, "a", encoding="utf-8"),
-                    stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL)
+                    stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
 
 def main():
     log("orchestrator up pid=%d; waiting on seed-0 report" % os.getpid())
