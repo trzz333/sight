@@ -188,3 +188,47 @@ unverified as of this handoff):
    real subprocess and will be far slower. This decides detached-run duration.
 3. Eval-of-record harness: confirm the greedy held-out eval on seeds 5000-5029
    vs 930.27 exists for Godot (`h5_baseline_cli` / `rl.evaluate`) or wire it.
+
+## Godot port: infra built and validated, 1M discount-first probe in flight (2026-07-05)
+
+The three pre-launch checks are resolved:
+1. VecNormalize is NOT in the train.py/factories pipeline (grep: zero hits).
+   So the recipe cannot be ported faithfully through `train.py`. Decision
+   (ADAPT, not BUILD-into-train.py): a dedicated Godot trainer that reuses the
+   sd_fast_ppo recipe structure with the env swapped. train.py would need
+   VecNormalize retrofit affecting all H2-H5 configs; the dedicated trainer
+   gives byte-level recipe fidelity and leaves the shared pipeline untouched.
+2. Throughput measured live. h3 smoke: ~30 steps/s single-env windowed. The
+   g99 trainer smoke (2 envs, headless): 70.9 steps/s. The 1M run (8 envs,
+   headless): ~119 steps/s aggregate. DummyVecEnv steps serially so n_envs
+   barely changes aggregate rate. Sizing: 1M ~2.3h, 5M ~12-20h/seed, a 5-seed
+   5M arm ~3-4 days. Anchors: M2.1 record (59.8 steps/s) + live logs.
+3. No faithful Godot eval-of-record existed. `rl.evaluate` never applies
+   VecNormalize and runs all episodes under one global seed, not the held-out
+   5000-5029 protocol. Wired into the new trainer's `evaluate()` instead.
+
+Godot binary: `Godot_v4.6.2-stable_win64.exe` under the WinGet packages path;
+run via `SIGHT_GODOT_EXE`. `where godot` and the env var are otherwise unset.
+
+Factory constraint: `make_env` rejects n_envs>1 for the Godot env
+("vectorized parallel Godot envs explicitly out of scope"), so the 8 training
+envs are constructed directly as a DummyVecEnv of 8 GodotSignalDodgeEnv, each
+with its own kernel-allocated TCP port (the sanctioned direct-construction
+path). Headless.
+
+New durable tool `tools\sd_godot_ppo_g99.py`, SMOKE-VALIDATED end to end
+(2 envs, 2000 steps, 3 eval seeds): multi-process Godot construction with
+distinct ports, VecNormalize wrap+save, and greedy held-out-seed eval all
+exercised. Smoke eval mean_len 323.0 (untrained-ish at 2000 steps, below bar,
+diverse actions 0.12/0.77/0.11, explained_variance 0.2891). Confidence HIGH
+that the infra is correct; the recipe's clearing behavior at real budget is
+still UNKNOWN on Godot.
+
+First real run IN FLIGHT: `g99_godot_1M_s0`, single seed, gamma 0.99, 1M steps,
+no curriculum, 8 envs headless (pid 34116, log
+`runs\sd_godot\g99_godot_1M_s0.log`). Staged on purpose: 1M is the controlled
+contrast against M2.1 (gamma 0.999 / 1M / Godot -> IQM 418). If gamma 0.99
+lifts clearly above 418 toward/past 930.27, scale to 5M then a 5-seed reliable
+arm. If flat, the discount alone does not transfer within budget on Godot, and
+the next lever is the curriculum injection (GDScript pre-spawn + protocol
+option) or accepting imitation as the standing solution (a Jeff scope call).
