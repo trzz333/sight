@@ -232,3 +232,56 @@ lifts clearly above 418 toward/past 930.27, scale to 5M then a 5-seed reliable
 arm. If flat, the discount alone does not transfer within budget on Godot, and
 the next lever is the curriculum injection (GDScript pre-spawn + protocol
 option) or accepting imitation as the standing solution (a Jeff scope call).
+
+
+## RESULT: discount-only port does NOT transfer to Godot; seed-curriculum ruled out (2026-07-05)
+
+`g99_godot_1M_s0` landed (train 9871s, 101.3 steps/s). Held-out greedy eval
+(seeds 5000-5029): mean_len 491.5, IQM ~476 (trim 0.25 of the 30 lengths),
+std 219.5, min 183, max 933 (a single seed grazed the bar once), beats_bar
+false, action_fracs 0.18/0.71/0.11. Final explained_variance -2.03 (critic
+worse than predicting the mean). Anchor: `runs\sd_godot\g99_godot_1M_s0_summary.json`.
+
+Judgement vs the controlled contrast M2.1 (gamma 0.999 / 1M / Godot -> IQM 418):
+gamma 0.99 lifts the IQM ~418 -> ~476 (+14%) but does NOT approach 930.27, and
+the critic never learns a usable value function (negative EV). This is the messy
+middle, not the pre-scripted clean-lift. Decisive read: the recipe that cleared
+the replica 5/5 was curriculum + gamma 0.99; the discount was the LAST knob on a
+curriculum scaffold, not a standalone fix. The Godot port dropped the curriculum
+(no injection seam) and kept only the discount. Two Godot from-scratch-no-curriculum
+attempts now both fail (0.999 -> 418, 0.99 -> 476). Per the contract (method fails
+twice, change the method; do not retry harder), the 5M discount-only run is NOT
+launched: it retries a twice-failed, curriculum-omitting recipe with 5x budget.
+Confidence HIGH.
+
+Method change = put the load-bearing curriculum onto Godot. Before committing to
+the GDScript injection, a Python-only shortcut was tested and KILLED: a
+seed-selection curriculum (filter reset seeds by natural above-player hazard
+density). Probe `runs\sd_godot\_probe_seedcurr.py` (shaped-telemetry env, 50
+seeds, first 10 frames, action=stay): `active_hazard_count_above_player` = 0 for
+ALL 50 seeds at every early frame. Clean Godot resets have zero early
+above-player density, so seed selection cannot supply the 2-6 hazards the replica
+curriculum injected. Seed-curriculum is impossible; the injection seam is
+required. Confidence HIGH (direct measurement). Also confirmed: `godot_env.reset`
+already accepts `options=` at the gym layer but does not plumb it into the
+transport, and the Godot side has no injection handler, so the GDScript +
+protocol work stands.
+
+## NEXT: build the Godot start-state curriculum injection (pre-registered "if short" branch)
+
+Port the FULL proven recipe (curriculum + gamma 0.99) to Godot. Build the seam:
+1. GDScript (in `games\signal-dodge`): at reset, read a curriculum hazard count
+   from the reset message; pre-spawn N hazards above the player (headroom ~100px,
+   no reset collision, no insta-death), mirroring `CurriculumSDF` on the replica.
+2. Protocol: carry `curriculum_n_init` (or similar) through the H3 reset wire
+   message; keep the clean-start path (N=0) byte-identical so eval is untouched.
+3. Python: plumb `godot_env.reset(options={...})` -> transport.reset -> wire;
+   add an `AnnealCurriculum` callback annealing n_init_max=6 -> 0 over anneal_frac
+   0.7, exactly as the replica. Eval stays greedy held-out 5000-5029 vs 930.27 on
+   the clean env.
+4. Smoke-validate like the replica: clean-start (N=0) obs byte-identical to the
+   current env; N=6 injects 6 hazards with no reset collision; live count mutation
+   reflected in reset; short train+eval end to end. THEN launch the Godot arm.
+Downstream Jeff scope call (only if the curriculum-injection port ALSO fails to
+clear on Godot): accept imitation (BC 1737.3, PPO-ft 1710.5) as the standing
+solution vs keep pursuing from-scratch. Not triggered yet.
