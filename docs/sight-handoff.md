@@ -6,7 +6,7 @@ Canonical handoff document. Updated at the end of every session by whoever execu
 
 **Phase:** Godot eval-of-record (discount-first port). Replica recipe search complete; gamma-0.99 cleared the replica gate. Porting to real Godot Signal Dodge, bar 930.27.
 
-**Last commit:** `<pending>` sd-godot: build + smoke-validate discount-first Godot g99 trainer, launch 1M probe
+**Last commit:** `02a6b0d` sd-godot: build + smoke-validate discount-first Godot g99 trainer, launch 1M probe
 
 **Current task:** Godot port infra built and SMOKE-VALIDATED; first real run in flight. New durable tool `tools\sd_godot_ppo_g99.py` ports the g99 recipe (m21 + VecNormalize @ gamma 0.99, reward none, 8 envs, MlpPolicy [64,64]) to the real Godot env, NO curriculum (not injectable without GDScript+protocol work). Smoke (2 envs, 2000 steps, 3 eval seeds) exercised multi-process Godot construction with distinct TCP ports, VecNormalize wrap+save, and greedy held-out-seed eval: mean_len 323.0, diverse actions, explained_variance 0.2891, beats_bar false (expected at 2000 steps). Infra correctness HIGH; clearing behavior at real budget UNKNOWN on Godot. First run `g99_godot_1M_s0` (single seed, gamma 0.99, 1M steps, 8 envs headless) launched detached, pid 34116, ~119 steps/s, ETA ~2.3h, log `runs\sd_godot\g99_godot_1M_s0.log`, summary will be `runs\sd_godot\g99_godot_1M_s0_summary.json`.
 
