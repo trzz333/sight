@@ -128,3 +128,63 @@ g99 arm is wired in, guarded on all 5 models being on disk; port gate = clears
 eval-of-record. If it lifts but is still short, next un-tried knobs are
 `anneal_frac` 0.7 -> 0.9 or higher `n_init_max` (hold the scaffold longer for
 slow seeds). The retired ent_coef idea is NOT the next move; the probe refuted it.
+
+## RESULT: gamma-0.99 arm CLEARS the port gate (2026-07-04)
+
+All 5 seeds landed and `tools\sd_fast_reliability.py` ran on the full 15+5
+model set. Held-out (greedy, seeds 5000-5029) per-seed means for the g99 arm:
+[1671.1, 1800.0, 1778.6, 1800.0, 1800.0]. rliable IQM 1792.9, 95% CI
+[1707.0, 1800.0], clears930 5/5, poolMean 1769.9. Note the CI ceiling 1800.0 is
+the episode cap: four of five seeds saturate survival.
+
+Gate: clears 5/5 AND IQM CI lower bound (1707.0) > BAR (930.27). BOTH true.
+Verdict printed: PORT.
+
+Comparisons:
+- g99 vs none: IQM +1059.3, P(IQM)=1.000, POI 0.937.
+- g99 vs curr: IQM +398.3, P(IQM)=0.995, POI 0.711. The discount cut, on the
+  same curriculum scaffold, is what converted the curriculum arm from
+  not-port-reliable (3/5, CI straddling the bar) to 5/5 saturating.
+
+Self-audit (evidence-anchored): seed-0's gate held-out mean 1671.1 matches
+seed-0's independently-written training summary mean_len 1671.13 (chain log),
+so the reload-eval cache is not stale. Gate clears/CI logic matches source
+line 192 read pre-run. First reliable from-scratch clear in project history;
+the wall was critic-variance under the near-undiscounted (gamma 0.999,
+horizon ~1000) return target on an 1800-step survival task, not exploration
+or policy capacity. Confidence HIGH.
+
+## Next: Godot 5M eval-of-record (discount-first port)
+
+The recipe that cleared is curriculum + gamma 0.99. BUT the start-state
+curriculum is not injectable into the real Godot env without GDScript +
+protocol work: `godot_env.reset()` passes only a seed through the transport;
+`active_hazard_count_above_player` is read-only telemetry, no hazard-injection
+seam. Decision (technical, mine): port DISCOUNT-FIRST. Run from-scratch on
+Godot with gamma 0.99, m21 recipe, NO curriculum. Rationale: the discount is
+the load-bearing lever this session; it needs zero Godot-side changes; it
+isolates whether the discount fix alone transfers to the real game. If it
+clears the 930.27 bar reliably, the curriculum GDScript work is unnecessary.
+If it lifts but is short, THEN build the curriculum injection path (GDScript
+pre-spawn N hazards at reset + protocol option + `godot_env.reset(options=)`)
+and port the full recipe.
+
+Port mechanics (adapt `configs\rl\signal_dodge_ppo_h3.yaml`, do NOT write
+blind): new config `signal_dodge_ppo_g99.yaml` with n_envs 8,
+total_timesteps 5_000_000, and hyperparams gamma 0.99, n_steps 512,
+batch_size 512, n_epochs 10, ent_coef 0.01, clip_range 0.2, learning_rate
+3e-4, gae_lambda 0.95, policy_kwargs.net_arch [64,64]. Run via
+`python -m sight_agent.rl.train --config ...`.
+
+TWO faithfulness checks to run BEFORE launching the 5M run (both cheap, both
+unverified as of this handoff):
+1. Does `train.py._build_train_env` wrap VecNormalize with a configurable
+   gamma? The m21/g99 recipe normalizes BOTH obs and reward with the training
+   gamma (0.99). If the Godot path does not apply VecNormalize(gamma=0.99),
+   the port is NOT faithful. Read `src\sight_agent\rl\train.py` lines ~157-204
+   and `factories.py`.
+2. Godot throughput. Launch the h3 smoke (1024 steps) or a short probe to get
+   steps/sec, then size the 5M run. sd_fast did 6551 steps/s; Godot steps a
+   real subprocess and will be far slower. This decides detached-run duration.
+3. Eval-of-record harness: confirm the greedy held-out eval on seeds 5000-5029
+   vs 930.27 exists for Godot (`h5_baseline_cli` / `rl.evaluate`) or wire it.
