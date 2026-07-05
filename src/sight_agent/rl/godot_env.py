@@ -262,6 +262,15 @@ class GodotSignalDodgeEnv(gym.Env):
         self._transport_factory = transport_factory or _default_transport_factory
         self._process_factory = process_factory or _default_process_factory
 
+        # Start-state curriculum injection count (Godot port of the replica
+        # CurriculumSDF, tools/sd_fast_ppo_curriculum.py). Public and mutable so
+        # the AnnealCurriculum SB3 callback can set_attr it live during training,
+        # exactly as it does on the replica env. 0 => clean starts (the default
+        # and the held-out eval path). reset() also honors an explicit
+        # options={"curriculum_n_init": N} override, which takes precedence for
+        # manual / smoke use.
+        self.curriculum_n_init = 0
+
         self.action_space = gym.spaces.Discrete(3)
         # Observation space dispatched on observation_mode per
         # docs/sight-h4-plan.md section 1. State mode is unchanged from H3
@@ -364,12 +373,26 @@ class GodotSignalDodgeEnv(gym.Env):
         self._episode_count += 1
         episode_id = f"ep-{self._episode_count:06d}"
 
+        # Effective curriculum injection count for this reset. An explicit
+        # options override wins (manual / smoke use); otherwise the live
+        # instance attribute the AnnealCurriculum callback mutates is used.
+        # 0 leaves the wire byte-identical to the pre-curriculum reset.
+        if options is not None and "curriculum_n_init" in options:
+            curriculum_n = int(options["curriculum_n_init"])
+        else:
+            curriculum_n = int(self.curriculum_n_init)
+        if curriculum_n < 0:
+            raise ValueError(
+                f"curriculum_n_init must be non-negative, got {curriculum_n}"
+            )
+
         try:
             if self._observation_mode == "state":
                 resp = self._transport.reset(
                     seed=episode_seed,
                     max_steps=self._max_steps,
                     episode_id=episode_id,
+                    curriculum_n_init=curriculum_n,
                 )
             elif self._observation_mode == "pixel":
                 resp = self._transport.reset(
@@ -380,6 +403,7 @@ class GodotSignalDodgeEnv(gym.Env):
                     pixel_width=self._pixel_width,
                     pixel_height=self._pixel_height,
                     pixel_channels=self._pixel_channels,
+                    curriculum_n_init=curriculum_n,
                 )
             else:
                 # observation_mode == "both" is permitted at construction

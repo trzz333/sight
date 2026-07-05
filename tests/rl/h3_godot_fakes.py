@@ -70,9 +70,18 @@ class FakeTransport:
             raise GodotTransportError("not connected")
         self.hello_sent = True
 
-    def reset(self, seed: int, max_steps: int, episode_id: str) -> dict:
+    def reset(
+        self,
+        seed: int,
+        max_steps: int,
+        episode_id: str,
+        *,
+        curriculum_n_init: int = 0,
+        **_extra,
+    ) -> dict:
         self.reset_calls.append(
-            {"seed": seed, "max_steps": max_steps, "episode_id": episode_id}
+            {"seed": seed, "max_steps": max_steps, "episode_id": episode_id,
+             "curriculum_n_init": curriculum_n_init}
         )
         item = self._reset_queue.pop(0)
         if isinstance(item, Exception):

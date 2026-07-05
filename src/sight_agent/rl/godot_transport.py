@@ -210,6 +210,7 @@ class GodotH3Transport:
         pixel_width: int | None = None,
         pixel_height: int | None = None,
         pixel_channels: int | None = None,
+        curriculum_n_init: int = 0,
     ) -> dict[str, Any]:
         """Send ``reset`` and block for exactly one ``reset_ok`` (or ``error``).
 
@@ -234,6 +235,15 @@ class GodotH3Transport:
             raise ValueError(f"max_steps must be positive int, got {max_steps!r}")
         if not isinstance(episode_id, str) or episode_id == "":
             raise ValueError("episode_id must be a non-empty string")
+        if (
+            isinstance(curriculum_n_init, bool)
+            or not isinstance(curriculum_n_init, int)
+            or curriculum_n_init < 0
+        ):
+            raise ValueError(
+                f"curriculum_n_init must be a non-negative int, "
+                f"got {curriculum_n_init!r}"
+            )
 
         # H4 mode/dim validation. The pixel-dim args are coupled to mode:
         # they are honored when mode is set and required (with defaults
@@ -304,6 +314,11 @@ class GodotH3Transport:
             "max_steps": max_steps,
         }
         msg.update(wire_extras)
+        # Curriculum injection count is an optional wire field. Omit it entirely
+        # when 0 so the clean-start / eval reset payload stays byte-identical to
+        # the pre-curriculum H3 wire. The Godot side treats absent and 0 the same.
+        if curriculum_n_init > 0:
+            msg["curriculum_n_init"] = int(curriculum_n_init)
         self._send_line(msg)
         resp = self._recv_message()
         self._reject_if_error(resp)

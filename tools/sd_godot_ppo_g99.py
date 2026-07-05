@@ -42,6 +42,7 @@ from pathlib import Path
 import numpy as np
 import gymnasium as gym
 from stable_baselines3 import PPO
+from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
@@ -49,6 +50,31 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 from sight_agent.rl.godot_env import GodotSignalDodgeEnv  # noqa: E402
 
 BAR = 930.27
+
+
+class AnnealCurriculum(BaseCallback):
+    """Linearly anneal curriculum_n_init from n0 to 0 over the first
+    anneal_frac of training, then hold 0 (clean starts) for the remainder.
+
+    Verbatim port of tools/sd_fast_ppo_curriculum.AnnealCurriculum: same
+    schedule, same set_attr mechanism. The Godot env exposes a public
+    ``curriculum_n_init`` attribute (godot_env.GodotSignalDodgeEnv) that its
+    reset() reads and forwards on the wire, so set_attr here reaches every
+    training env exactly as it does on the replica."""
+
+    def __init__(self, n0: int, total_steps: int, anneal_frac: float = 0.7):
+        super().__init__()
+        self.n0 = int(n0)
+        self.T = max(1.0, total_steps * anneal_frac)
+        self._last = None
+
+    def _on_step(self) -> bool:
+        frac = min(1.0, self.num_timesteps / self.T)
+        val = int(round(self.n0 * (1.0 - frac)))
+        if val != self._last:
+            self.training_env.set_attr("curriculum_n_init", val)
+            self._last = val
+        return True
 
 
 def _alloc_tcp_port() -> int:
@@ -140,6 +166,13 @@ def main():
     p.add_argument("--project", type=str, default=None)
     p.add_argument("--max-steps", type=int, default=1800)
     p.add_argument("--no-headless", action="store_true")
+    # Start-state curriculum (Godot port of the replica recipe). Off by default
+    # so the discount-only trainer behavior is unchanged. When --curriculum is
+    # passed, training resets pre-spawn n_init_max hazards above the player,
+    # annealing to 0 over the first anneal_frac of training. Eval stays clean.
+    p.add_argument("--curriculum", action="store_true")
+    p.add_argument("--n-init-max", type=int, default=6)
+    p.add_argument("--anneal-frac", type=float, default=0.7)
     # g99 recipe knobs (defaults = g99 verbatim at gamma 0.99).
     p.add_argument("--gamma", type=float, default=0.99)
     p.add_argument("--gae-lambda", type=float, default=0.95)
@@ -168,6 +201,17 @@ def main():
     venv = VecNormalize(venv, norm_obs=True, norm_reward=True, gamma=args.gamma,
                         clip_obs=10.0, clip_reward=10.0)
 
+    callback = None
+    if args.curriculum:
+        # Pre-seed every training env so the FIRST reset already injects
+        # n_init_max hazards, matching the replica (whose CurriculumSDF is
+        # constructed with n_init_max). Without this, the first rollout's resets
+        # would run clean because the anneal callback's first set_attr only fires
+        # after the first env step. set_attr propagates through VecNormalize to
+        # the underlying GodotSignalDodgeEnv instances.
+        venv.set_attr("curriculum_n_init", args.n_init_max)
+        callback = AnnealCurriculum(args.n_init_max, args.steps, args.anneal_frac)
+
     model = PPO("MlpPolicy", venv, seed=args.seed, n_steps=args.n_steps,
                 batch_size=args.batch_size, n_epochs=args.n_epochs,
                 gamma=args.gamma, gae_lambda=args.gae_lambda,
@@ -176,7 +220,7 @@ def main():
                 device="cpu", verbose=1)
 
     t0 = time.perf_counter()
-    model.learn(total_timesteps=args.steps, progress_bar=False)
+    model.learn(total_timesteps=args.steps, progress_bar=False, callback=callback)
     train_s = time.perf_counter() - t0
 
     model_path = out / f"{args.run_id}.zip"
@@ -201,10 +245,15 @@ def main():
         raw.close()
 
     summary = {
-        "run_id": args.run_id, "recipe": "g99-verbatim-godot-no-curriculum",
+        "run_id": args.run_id,
+        "recipe": ("g99-verbatim-godot+start-curriculum" if args.curriculum
+                   else "g99-verbatim-godot-no-curriculum"),
         "env": "godot:signal-dodge-v0", "reward_mode": "none",
         "seed": args.seed, "steps": args.steps, "n_envs": args.n_envs,
         "headless": headless,
+        "curriculum": ({"enabled": True, "n_init_max": args.n_init_max,
+                        "anneal_frac": args.anneal_frac} if args.curriculum
+                       else {"enabled": False}),
         "hparams": {"gamma": args.gamma, "gae_lambda": args.gae_lambda,
                     "n_steps": args.n_steps, "batch_size": args.batch_size,
                     "n_epochs": args.n_epochs, "ent_coef": args.ent_coef,

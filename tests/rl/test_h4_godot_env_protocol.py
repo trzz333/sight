@@ -57,6 +57,7 @@ class _ModeRecordingFakeTransport(FakeTransport):
         pixel_width: int | None = None,
         pixel_height: int | None = None,
         pixel_channels: int | None = None,
+        curriculum_n_init: int = 0,
     ) -> dict:
         self.last_reset_kwargs = {
             "seed": seed,
@@ -66,9 +67,11 @@ class _ModeRecordingFakeTransport(FakeTransport):
             "pixel_width": pixel_width,
             "pixel_height": pixel_height,
             "pixel_channels": pixel_channels,
+            "curriculum_n_init": curriculum_n_init,
         }
         # Reuse the parent's queue draining for response payloads.
-        return super().reset(seed=seed, max_steps=max_steps, episode_id=episode_id)
+        return super().reset(seed=seed, max_steps=max_steps, episode_id=episode_id,
+                             curriculum_n_init=curriculum_n_init)
 
 
 def _pixel_obs_payload(c: int = 1, h: int = 84, w: int = 84, fill: int = 0) -> dict:
@@ -417,3 +420,33 @@ def test_pixel_reset_emits_two_obs_metadata_events_after_two_resets(tmp_path):
     # correlate metadata to a specific episode.
     assert obs_meta[0]["episode_id"] == "ep-000001"
     assert obs_meta[1]["episode_id"] == "ep-000002"
+
+
+# --- start-state curriculum forwarding (env -> transport) ----------------
+
+
+def test_curriculum_defaults_zero_on_reset():
+    """With no curriculum set, the env forwards curriculum_n_init=0."""
+    env, tx, _ = _make_env(observation_mode="state")
+    tx.queue_reset(_reset_ok_payload())
+    env.reset(seed=0)
+    assert tx.last_reset_kwargs["curriculum_n_init"] == 0
+
+
+def test_curriculum_attr_forwards_to_transport():
+    """The public curriculum_n_init attribute (mutated by AnnealCurriculum via
+    set_attr) is forwarded to the transport on reset."""
+    env, tx, _ = _make_env(observation_mode="state")
+    tx.queue_reset(_reset_ok_payload())
+    env.curriculum_n_init = 4
+    env.reset(seed=0)
+    assert tx.last_reset_kwargs["curriculum_n_init"] == 4
+
+
+def test_curriculum_options_override_wins():
+    """An explicit options={curriculum_n_init: N} overrides the instance attr."""
+    env, tx, _ = _make_env(observation_mode="state")
+    tx.queue_reset(_reset_ok_payload())
+    env.curriculum_n_init = 4
+    env.reset(seed=0, options={"curriculum_n_init": 2})
+    assert tx.last_reset_kwargs["curriculum_n_init"] == 2

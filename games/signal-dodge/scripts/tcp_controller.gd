@@ -96,6 +96,13 @@ const FIELD_PIXEL_WIDTH := "pixel_width"
 const FIELD_PIXEL_HEIGHT := "pixel_height"
 const FIELD_PIXEL_CHANNELS := "pixel_channels"
 
+# Start-state curriculum injection (Godot port of the replica CurriculumSDF,
+# tools/sd_fast_ppo_curriculum.py). Optional non-negative int on the reset
+# request. Default/absent -> 0, which preserves byte-identical clean-start
+# behavior. When > 0, main.gd pre-spawns N hazards above the player at reset.
+# The held-out eval never sends this field, so the eval-of-record is untouched.
+const FIELD_CURRICULUM_N_INIT := "curriculum_n_init"
+
 # Default pixel dims when observation_mode is set without explicit dims
 # (the env layer always sends explicit dims, but the Godot side defaults
 # safely so a malformed payload from a future caller is not silently
@@ -485,8 +492,24 @@ func _h3_handle_reset(msg: Dictionary) -> void:
 	_h3_pixel_height = requested_h
 	_h3_pixel_channels = requested_c
 
+	# Curriculum injection count (optional). Validated to a non-negative int and
+	# stamped back onto the parked request as a clean int so main.gd reads a
+	# coerced value regardless of JSON float widening. Absent -> 0 (clean start),
+	# which leaves the parked request and the downstream reset path byte-identical
+	# to the pre-curriculum behavior.
+	var curriculum_n := 0
+	if msg.has(FIELD_CURRICULUM_N_INIT):
+		var cn := _h3_parse_nonneg_int(msg.get(FIELD_CURRICULUM_N_INIT))
+		if cn < 0:
+			send_error(ERROR_BAD_REQUEST,
+				"curriculum_n_init must be a non-negative int, got %s"
+					% str(msg.get(FIELD_CURRICULUM_N_INIT)))
+			return
+		curriculum_n = cn
+
 	_h3_episode_id = str(msg.get("episode_id", ""))
 	_pending_request = msg.duplicate()
+	_pending_request[FIELD_CURRICULUM_N_INIT] = curriculum_n
 	SightLog.log_event("controller_reset_received", _decorate({
 		"episode_id": _h3_episode_id,
 		"seed": int(msg.get("seed", 0)),
@@ -495,6 +518,7 @@ func _h3_handle_reset(msg: Dictionary) -> void:
 		FIELD_PIXEL_WIDTH: _h3_pixel_width,
 		FIELD_PIXEL_HEIGHT: _h3_pixel_height,
 		FIELD_PIXEL_CHANNELS: _h3_pixel_channels,
+		FIELD_CURRICULUM_N_INIT: curriculum_n,
 	}))
 
 # Returns the parsed positive int on success, -1 on type mismatch or
@@ -514,6 +538,26 @@ func _h3_parse_positive_int(value: Variant) -> int:
 			return -1
 	var n := int(value)
 	if n <= 0:
+		return -1
+	return n
+
+# Returns the parsed non-negative int on success, -1 on type mismatch or a
+# negative value. Mirrors _h3_parse_positive_int but admits 0 (the clean-start
+# and anneal-terminal curriculum value). Accepts TYPE_INT and TYPE_FLOAT
+# (widened by Godot 4.6.2 JSON.parse_string); rejects TYPE_BOOL and non-whole
+# floats so a malformed curriculum count fails loud rather than truncating.
+func _h3_parse_nonneg_int(value: Variant) -> int:
+	var t := typeof(value)
+	if t == TYPE_BOOL:
+		return -1
+	if t != TYPE_INT and t != TYPE_FLOAT:
+		return -1
+	if t == TYPE_FLOAT:
+		var f := float(value)
+		if f != floor(f):
+			return -1
+	var n := int(value)
+	if n < 0:
 		return -1
 	return n
 

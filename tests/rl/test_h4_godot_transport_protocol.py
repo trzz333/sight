@@ -245,6 +245,35 @@ def test_default_reset_validates_h3_state_obs(server, transport):
     assert resp["obs"] == [0.0] * 10
 
 
+# --- start-state curriculum wire field -----------------------------------
+
+
+def test_reset_omits_curriculum_when_zero(server, transport):
+    """curriculum_n_init defaults to 0 and must NOT appear on the wire, so the
+    eval / clean-start reset payload is byte-identical to the pre-curriculum H3
+    wire."""
+    server.queue_response(_state_reset_ok("test-run", "ep-1"))
+    transport.reset(seed=0, max_steps=100, episode_id="ep-1")
+    server.wait_inbound(1)
+    sent = server.inbound[0]
+    assert "curriculum_n_init" not in sent
+
+
+def test_reset_includes_curriculum_when_positive(server, transport):
+    """A positive curriculum_n_init is carried on the wire as an int."""
+    server.queue_response(_state_reset_ok("test-run", "ep-1"))
+    transport.reset(seed=0, max_steps=100, episode_id="ep-1", curriculum_n_init=6)
+    server.wait_inbound(1)
+    sent = server.inbound[0]
+    assert sent["curriculum_n_init"] == 6
+
+
+def test_reset_rejects_negative_curriculum(transport):
+    """A negative curriculum_n_init is a caller error and fails loud."""
+    with pytest.raises(ValueError):
+        transport.reset(seed=0, max_steps=100, episode_id="ep-1", curriculum_n_init=-1)
+
+
 # --- explicit state mode -------------------------------------------------
 
 

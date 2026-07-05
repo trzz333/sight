@@ -23,6 +23,13 @@ const SCREEN_HEIGHT := 540
 const HAZARD_SIZE := 24
 const RANDOM_SEED := 42
 
+# Start-state curriculum: injected hazards are placed with their centers at least
+# this many px above the player center. 100px > COLLIDE_THRESH (28) guarantees no
+# reset-frame overlap (no insta-death) and leaves reaction time before the nearest
+# injected hazard can reach the player. Mirrors INIT_HEADROOM in
+# tools/sd_fast_ppo_curriculum.py (the proven replica curriculum).
+const CURRICULUM_HEADROOM_PX := 100.0
+
 # H3 step 4 observation contract. Mirrors docs/sight-h3-plan.md section 2.
 const H3_OBS_DIM := 10
 
@@ -217,6 +224,36 @@ func _spawn_hazard() -> void:
 		"y": y,
 	})
 
+func _h3_inject_curriculum_hazards(n: int) -> void:
+	# Pre-spawn N hazards uniformly across the spawn width and vertically in
+	# [-HAZARD_SIZE, player_y - CURRICULUM_HEADROOM_PX], mirroring the replica
+	# CurriculumSDF.reset (tools/sd_fast_ppo_curriculum.py). Draws come from the
+	# same global RNG (randf_range) as _spawn_hazard, called after the reset
+	# seed(). Each injected hazard gets a fresh deterministic h3_spawn_id and
+	# joins _hazards, so it is advanced, culled, collided against, and observed
+	# exactly like a normally-spawned hazard. The x range equals _spawn_hazard's;
+	# the y range keeps every injected hazard at least CURRICULUM_HEADROOM_PX
+	# above the player center, so none overlaps the player on the reset frame.
+	var x_lo := HAZARD_SIZE / 2.0
+	var x_hi := float(SCREEN_WIDTH) - HAZARD_SIZE / 2.0
+	var y_lo := float(-HAZARD_SIZE)
+	var y_hi := _player_start_pos.y - CURRICULUM_HEADROOM_PX
+	for _i in range(n):
+		_hazard_id_counter += 1
+		var hz := HAZARD_SCENE.instantiate()
+		var x := randf_range(x_lo, x_hi)
+		var y := randf_range(y_lo, y_hi)
+		hz.position = Vector2(x, y)
+		add_child(hz)
+		hz.set_meta("h3_spawn_id", _hazard_id_counter)
+		_hazards.append(hz)
+		SightLog.log_event("curriculum_spawn", {
+			"hazard_id": _hazard_id_counter,
+			"frame": _frame_counter,
+			"x": x,
+			"y": y,
+		})
+
 func _on_player_died(survival_time: float, hazard_pos: Vector2, player_pos: Vector2) -> void:
 	# H3 mode (locked): record collision state for the in-flight step and let
 	# _h3_perform_step send a terminated step_result. Do NOT stop TCP, do NOT call
@@ -354,13 +391,25 @@ func _h3_perform_soft_reset(req: Dictionary) -> void:
 	var seed_value: int = int(req.get("seed", RANDOM_SEED))
 	seed(seed_value)
 	_h3_max_steps = int(req.get("max_steps", 0))
+	# Start-state curriculum injection count (Godot port of the replica
+	# CurriculumSDF, tools/sd_fast_ppo_curriculum.py). Validated and stamped by
+	# tcp_controller._h3_handle_reset; 0 => no injection (clean start / eval).
+	var curriculum_n: int = int(req.get("curriculum_n_init", 0))
 	var episode_id: String = str(req.get("episode_id", ""))
+	# episode_start is logged BEFORE injection so the subsequent curriculum_spawn
+	# events fall inside this episode's log window (announce, then pre-spawn).
 	SightLog.log_event("episode_start", {
 		"episode_id": episode_id,
 		"seed": seed_value,
 		"max_steps": _h3_max_steps,
 		"frame": _frame_counter,
+		"curriculum_n_init": curriculum_n,
 	})
+	# Injection runs AFTER seed() so pre-spawn draws are deterministic per seed and
+	# share the RNG stream with subsequent in-episode spawns, mirroring the replica
+	# ordering (curriculum draws precede in-episode spawn draws from one generator).
+	if curriculum_n > 0:
+		_h3_inject_curriculum_hazards(curriculum_n)
 	var info := {
 		"seed": seed_value,
 		"max_steps": _h3_max_steps,

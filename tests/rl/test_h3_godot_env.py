@@ -138,7 +138,8 @@ def test_reset_launches_godot_and_sends_hello(env, fake_proc, fake_transport):
     assert info["tcp_port"] == 8765
     # Transport saw the right reset args.
     assert fake_transport.reset_calls == [
-        {"seed": 42, "max_steps": 100, "episode_id": "ep-000001"}
+        {"seed": 42, "max_steps": 100, "episode_id": "ep-000001",
+         "curriculum_n_init": 0}
     ]
 
 
