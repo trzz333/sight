@@ -87,3 +87,4 @@ tmp/
 scaffold.ps1
 # accidental in-repo commit message scratch file (handoff workflow)
 COMMIT_MSG.txt
+_vizdoom.ini 
