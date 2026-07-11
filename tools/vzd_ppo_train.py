@@ -1,10 +1,16 @@
 """PPO from pixels on ViZDoom defend_the_center (SB3, GPU).
 
 RL teacher for the vzd track: trains a CnnPolicy on the bundled
-VizdoomDefendCenter-v1 gymnasium env. Gray 84x112, frame-skip 4,
-frame-stack 4, gamma 0.99 (the K-phase lesson). Writes progress to
+VizdoomDefendCenter-v1 gymnasium env. Gray 60x80 (stride-4 downsample
+of 240x320), frame-skip 4, frame-stack 4, gamma 0.99 (the K-phase
+lesson). Writes progress to
 <out>/log.csv, checkpoints, final model.zip + summary.json, and a
 DONE sentinel for detached monitoring.
+
+Note on --resume semantics: SB3's reset_num_timesteps=False treats
+--steps as ADDITIONAL steps on top of the checkpoint, not a total
+target. Resuming a 750k checkpoint with --steps 1500000 trains to
+2.25M total.
 
 Usage:
   .venv-c1\\Scripts\\python.exe tools\\vzd_ppo_train.py --steps 1500000
@@ -139,7 +145,7 @@ def main() -> None:
         "steps_per_sec": round(args.steps / train_s, 1),
         "eval_episodes": n_eval, "mean_reward": float(r.mean()),
         "iqm_reward": float(trim_mean(r, 0.25)), "rewards": rewards,
-        "gamma": 0.99, "recipe": "PPO CnnPolicy gray84x112 skip4 stack4"}
+        "gamma": 0.99, "recipe": "PPO CnnPolicy gray60x80 skip4 stack4"}
     (out / "summary.json").write_text(json.dumps(summary, indent=2))
     (out / "DONE").write_text("ok")
     print(json.dumps(summary, indent=2))
