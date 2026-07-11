@@ -6,7 +6,7 @@ Canonical handoff document. Updated at the end of every session by whoever execu
 
 **Phase:** VZD-1 (ViZDoom defend_the_center: RL teacher run + validated BC-from-demos pipeline; Godot Signal Dodge closed with imitation as the standing solution)
 
-**Last commit:** PENDING
+**Last commit:** 92b8913 vzd: PPO teacher on defend_the_center (GPU, resume-capable)
 
 **Current task:** PPO CnnPolicy (gray 60x80, skip 4, stack 4, gamma 0.99) training on VizdoomDefendCenter-v1, resumed from the 750k checkpoint after the first run was killed at 772k, running detached PID 15376, log runs\vzd\ppo_defend\train_log2.txt. At 758k steps ep_rew_mean 9.7 (about ten kills per episode vs about zero untrained), entropy 0.31, explained variance 0.90. ETA roughly 105 min from 13:15 to finish 1.5M, then it writes model.zip, summary.json (30-ep deterministic eval, mean + IQM), and a DONE sentinel. BC pipeline (vzd_record_demo, vzd_extract_dataset, vzd_bc_train, vzd_bc_eval) validated end to end on stand-in data at ce0b3ad; desktop icon "Record Doom Demos" deployed for optional human demos.
 
