@@ -4,20 +4,20 @@ Canonical handoff document. Updated at the end of every session by whoever execu
 
 ---
 
-**Phase:** VZD-1 (ViZDoom defend_the_center: RL teacher run + validated BC-from-demos pipeline; Godot Signal Dodge closed with imitation as the standing solution)
+**Phase:** VZD-1 complete (ViZDoom defend_the_center PPO teacher trained, evaluated, packaged; Godot Signal Dodge closed with imitation as the standing solution)
 
-**Last commit:** 92b8913 vzd: PPO teacher on defend_the_center (GPU, resume-capable)
+**Last commit:** 09ec084 vzd: teacher results + resume packaging
 
-**Current task:** PPO CnnPolicy (gray 60x80, skip 4, stack 4, gamma 0.99) training on VizdoomDefendCenter-v1, resumed from the 750k checkpoint after the first run was killed at 772k, running detached PID 15376, log runs\vzd\ppo_defend\train_log2.txt. At 758k steps ep_rew_mean 9.7 (about ten kills per episode vs about zero untrained), entropy 0.31, explained variance 0.90. ETA roughly 105 min from 13:15 to finish 1.5M, then it writes model.zip, summary.json (30-ep deterministic eval, mean + IQM), and a DONE sentinel. BC pipeline (vzd_record_demo, vzd_extract_dataset, vzd_bc_train, vzd_bc_eval) validated end to end on stand-in data at ce0b3ad; desktop icon "Record Doom Demos" deployed for optional human demos.
+**Current task:** None in flight. VZD teacher finished at 2.25M total steps (SB3 resume gotcha: reset_num_timesteps=False ADDS --steps to the checkpoint count; documented in the trainer docstring). Eval of record: mean 12.17 / IQM 12.75 kills per episode, 30 deterministic eps, rewards 7-15 with the 15 ceiling hit 13/30. 30s clip at runs\vzd\ppo_defend\gameplay.mp4 (640x480). Resume packaging shipped: README results table (every number re-verified against on-disk summaries this session, Spearman -0.19 and median 573->393 recomputed from the 1M/5M Godot summaries), gamma/critic-collapse story, docs\vzd-ppo-teacher-findings.md.
 
-**Next action:** Check runs\vzd\ppo_defend for DONE and a fresh summary.json. If mean/IQM is strong, write a watch/eval tool for the SB3 model (vzd_bc_eval covers BC nets only), record a 30s gameplay clip, then execute the approved resume packaging: README rewrite with results table, the gamma/critic-collapse story, and a short writeup. If the run died again, diagnose train_log2.txt; a second unexplained death means change the launch method (schtasks or supervising wrapper), not relaunch harder.
+**Next action:** Jeff-owned: review README + clip for the resume/LinkedIn use. Claude-owned candidates when a session opens: (a) BC-from-teacher on VZD (extract dataset from the trained model's rollouts, train BC, compare to teacher; exercises the validated vzd_bc_* pipeline with real data), or (b) close VZD-1 and pick the next target from docs\target-backlog.md. Default is (a); it is the cheapest way to put real data through the imitation pipeline.
 
 **Blockers:** None requiring Jeff.
 
 **Notes:**
 
-- Run-death postmortem: first 1.5M run killed at 772k by Claude's own kill_process fired at a stale PID mid-triage; the ESRCH reply was misleading, the tree died anyway. Rule: never kill_process near a live training run; finish assessment first. Salvaged via 250k-interval checkpoints plus a new --resume flag.
-- CUDA is on: torch 2.13.0+cu126, RTX 4080 Laptop GPU. Throughput 120 fps with 8 SubprocVecEnv workers.
-- Terminal popups root cause: cmd /c wrappers spawn console hosts, hundreds per session. PowerShell-native commands only from now on (also stored in cross-session memory). Jeff to confirm the flashes stopped.
-- Resume packaging approved by Jeff: gameplay video is the LinkedIn-legible artifact; README results table and honest negative-results writeup are the hiring-manager-legible ones (found-art search this session).
-- Stale-sentinel footgun: smoke runs wrote DONE/summary.json into the real out dir; deleted before relaunch. Future smokes take --out to a scratch dir.
+- vzd_ppo_watch.py (9ad5bc6): watch / record / headless-eval for SB3 checkpoints, exact training preprocessing, --record mp4 at 35fps with --scale (default 2x to 640x480).
+- Monitor for the vzd run: runs\vzd\ppo_defend\monitor.html served detached on 127.0.0.1:8791 (relaunch via runs\_launch_monitor_vzd.py). Godot monitor server script remains at runs\_monitor_server.py (port collision: only one at a time on 8791).
+- PowerShell here-string footgun: the closing '@ terminator must be alone at column 0; commands on the same line wedge the session in continuation mode. Commit messages go through a temp file written by write_file, never inline here-strings through interact_with_process.
+- Run-death postmortem stands: never kill_process near a live training run. The one death this cycle was self-inflicted at 772k; resume + checkpoints salvaged it.
+- Stale-sentinel rule stands: smoke runs take --out to a scratch dir.
