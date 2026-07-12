@@ -1,9 +1,12 @@
-"""PPO from pixels on ViZDoom defend_the_center (SB3, GPU).
+"""PPO from pixels on bundled ViZDoom scenarios (SB3, GPU).
 
-RL teacher for the vzd track: trains a CnnPolicy on the bundled
-VizdoomDefendCenter-v1 gymnasium env. Gray 60x80 (stride-4 downsample
+RL teacher for the vzd track: trains a CnnPolicy on a bundled
+vizdoom gymnasium env (--env-id, default VizdoomDefendCenter-v1;
+VZD-3 uses VizdoomDeadlyCorridor-v1). Gray 60x80 (stride-4 downsample
 of 240x320), frame-skip 4, frame-stack 4, gamma 0.99 (the K-phase
-lesson). Writes progress to
+lesson). --doom-skill overrides the scenario cfg skill (deadly_corridor
+ships at skill 5; skill curriculum is the standard lever there).
+Writes progress to
 <out>/log.csv, checkpoints, final model.zip + summary.json, and a
 DONE sentinel for detached monitoring.
 
@@ -15,6 +18,7 @@ target. Resuming a 750k checkpoint with --steps 1500000 trains to
 Usage:
   .venv-c1\\Scripts\\python.exe tools\\vzd_ppo_train.py --steps 1500000
   .venv-c1\\Scripts\\python.exe tools\\vzd_ppo_train.py --steps 2000 --smoke
+  .venv-c1\\Scripts\\python.exe tools\\vzd_ppo_train.py --env-id VizdoomDeadlyCorridor-v1 --doom-skill 1 --steps 1500000
 """
 
 from __future__ import annotations
@@ -28,8 +32,18 @@ import gymnasium as gym
 import numpy as np
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-ENV_ID = "VizdoomDefendCenter-v1"
+DEFAULT_ENV_ID = "VizdoomDefendCenter-v1"
+ENV_ID = DEFAULT_ENV_ID  # compat alias: vzd_rollout_dataset.py and friends import this
 STRIDE = 4  # 240x320 RGB -> 60x80 gray
+
+
+def out_slug(env_id: str) -> str:
+    """VizdoomDefendCenter-v1 -> ppo_defend (legacy), else ppo_<snake>."""
+    if env_id == DEFAULT_ENV_ID:
+        return "ppo_defend"  # keep the existing run dir stable
+    import re
+    core = re.sub(r"^Vizdoom|-v\d+$", "", env_id)
+    return "ppo_" + re.sub(r"(?<!^)(?=[A-Z])", "_", core).lower()
 
 
 class GrayStride(gym.ObservationWrapper):
@@ -63,11 +77,12 @@ class SkipFrames(gym.Wrapper):
         return obs, total, terminated, truncated, info
 
 
-def make_env(seed: int):
+def make_env(env_id: str, seed: int, doom_skill: int | None = None):
     def _f():
         import vizdoom.gymnasium_wrapper  # noqa: F401  (registers envs)
         from stable_baselines3.common.monitor import Monitor
-        env = gym.make(ENV_ID)
+        kw = {} if doom_skill is None else {"doom_skill": doom_skill}
+        env = gym.make(env_id, **kw)
         env = GrayStride(env)
         env = SkipFrames(env, 4)
         env = Monitor(env)  # emits ep_rew_mean / ep_len_mean to the log
@@ -79,6 +94,9 @@ def make_env(seed: int):
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--steps", type=int, default=1_500_000)
+    ap.add_argument("--env-id", default=DEFAULT_ENV_ID)
+    ap.add_argument("--doom-skill", type=int, default=None,
+                    help="override scenario cfg doom_skill (deadly_corridor ships at 5)")
     ap.add_argument("--n-envs", type=int, default=8)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--out", default=None)
@@ -91,10 +109,11 @@ def main() -> None:
     from stable_baselines3.common.vec_env import SubprocVecEnv, VecFrameStack
     from stable_baselines3.common.callbacks import CheckpointCallback
 
-    out = Path(args.out) if args.out else REPO_ROOT / "runs" / "vzd" / "ppo_defend"
+    out = Path(args.out) if args.out else REPO_ROOT / "runs" / "vzd" / out_slug(args.env_id)
     out.mkdir(parents=True, exist_ok=True)
 
-    venv = SubprocVecEnv([make_env(args.seed + i) for i in range(args.n_envs)])
+    venv = SubprocVecEnv([make_env(args.env_id, args.seed + i, args.doom_skill)
+                          for i in range(args.n_envs)])
     venv = VecFrameStack(venv, 4)
 
     if args.resume:
@@ -111,7 +130,7 @@ def main() -> None:
 
     cb = None if args.smoke else CheckpointCallback(
         save_freq=max(250_000 // args.n_envs, 1), save_path=str(out),
-        name_prefix="ppo_defend")
+        name_prefix=out_slug(args.env_id))
 
     t0 = time.time()
     model.learn(total_timesteps=args.steps, callback=cb, progress_bar=False,
@@ -122,7 +141,7 @@ def main() -> None:
 
     # deterministic eval, fresh single env
     from stable_baselines3.common.vec_env import DummyVecEnv
-    ev = VecFrameStack(DummyVecEnv([make_env(10_000)]), 4)
+    ev = VecFrameStack(DummyVecEnv([make_env(args.env_id, 10_000, args.doom_skill)]), 4)
     rewards = []
     n_eval = 3 if args.smoke else 30
     obs = ev.reset()
@@ -140,7 +159,8 @@ def main() -> None:
     r = np.array(rewards, float)
     from scipy.stats import trim_mean
     summary = {
-        "env": ENV_ID, "steps": args.steps, "n_envs": args.n_envs,
+        "env": args.env_id, "doom_skill": args.doom_skill,
+        "steps": args.steps, "n_envs": args.n_envs,
         "seed": args.seed, "train_seconds": round(train_s, 1),
         "steps_per_sec": round(args.steps / train_s, 1),
         "eval_episodes": n_eval, "mean_reward": float(r.mean()),

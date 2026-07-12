@@ -1,4 +1,4 @@
-"""Watch / record a trained SB3 PPO model on ViZDoom defend_the_center.
+"""Watch / record a trained SB3 PPO model on a bundled ViZDoom scenario.
 
 Loads a PPO checkpoint (.zip) and runs deterministic episodes with the
 exact training preprocessing (GrayStride, SkipFrames, VecFrameStack 4).
@@ -10,6 +10,7 @@ Modes:
 Usage:
   .venv-c1\\Scripts\\python.exe tools\\vzd_ppo_watch.py --model runs\\vzd\\ppo_defend\\model.zip --episodes 5
   .venv-c1\\Scripts\\python.exe tools\\vzd_ppo_watch.py --model ... --record runs\\vzd\\ppo_defend\\gameplay.mp4 --seconds 30
+  .venv-c1\\Scripts\\python.exe tools\\vzd_ppo_watch.py --env-id VizdoomDeadlyCorridor-v1 --doom-skill 1 --model runs\\vzd\\ppo_deadly_corridor\\model.zip --record clip.mp4
 """
 
 from __future__ import annotations
@@ -22,7 +23,7 @@ import gymnasium as gym
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from vzd_ppo_train import ENV_ID, GrayStride, SkipFrames  # noqa: E402
+from vzd_ppo_train import DEFAULT_ENV_ID, GrayStride, SkipFrames  # noqa: E402
 
 
 class FrameTap(gym.Wrapper):
@@ -46,6 +47,9 @@ class FrameTap(gym.Wrapper):
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--model", required=True)
+    ap.add_argument("--env-id", default=DEFAULT_ENV_ID)
+    ap.add_argument("--doom-skill", type=int, default=None,
+                    help="must match the skill the model was trained at")
     ap.add_argument("--episodes", type=int, default=5)
     ap.add_argument("--seed", type=int, default=10_000)
     ap.add_argument("--watch", action="store_true")
@@ -64,7 +68,9 @@ def main() -> None:
 
     def _f():
         kw = {"render_mode": "human"} if args.watch else {}
-        env = gym.make(ENV_ID, **kw)
+        if args.doom_skill is not None:
+            kw["doom_skill"] = args.doom_skill
+        env = gym.make(args.env_id, **kw)
         if args.record:
             env = FrameTap(env, frames)
         env = GrayStride(env)
