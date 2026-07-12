@@ -4,20 +4,20 @@ Canonical handoff document. Updated at the end of every session by whoever execu
 
 ---
 
-**Phase:** VZD-2 complete (teacher-to-student distillation on defend_the_center; VZD-1 teacher and Godot Signal Dodge imitation both stand)
+**Phase:** VZD-3 in flight (deadly_corridor PPO teacher training; VZD-2 distillation and all prior results stand)
 
-**Last commit:** 9d469bf vzd: VZD-2 teacher-to-student distillation, student matches teacher
+**Last commit:** 715028f vzd: generalize PPO trainer/watcher to --env-id and --doom-skill for VZD-3
 
-**Current task:** None in flight. VZD-2 shipped end to end this session. tools\vzd_rollout_dataset.py rolls the PPO teacher out in its exact training env chain and writes a BC dataset schema-identical to the LMP extractor (student frames mean-gray stride-2 120x160 of the 240x320 RGB screen, labels from game.get_last_action). 100 episodes, 20469 samples, teacher rollout mean 12.55 / IQM 13.26. vzd_bc_eval.py gained --obs rgb2 so student eval matches the dataset derivation. Student (93.4% val action match) evals at mean 12.57 / IQM 13.31 over 30 eps vs teacher of record 12.17 / 12.75. Distillation lossless within noise; both near the 15-kill scenario ceiling. README results table and methods line updated.
+**Current task:** VZD-3 baseline run LIVE, launched 2026-07-12 ~10:40 CDT: vzd_ppo_train.py --env-id VizdoomDeadlyCorridor-v1 --steps 1500000, skill 5 (cfg default, the honest baseline), out runs\vzd\ppo_deadly_corridor, log runs\vzd\ppo_deadly_corridor_train.log. At 57k steps it ran ~113 fps, ETA ~3.5-4h. Both smokes passed pre-launch: corridor skill-3 smoke (reward ~767 scale sane, doom_skill recorded in summary) and defend default smoke (dirs and schema unchanged), scratch dirs runs\vzd\_smoke_*. Generalization committed at 715028f.
 
-**Next action:** VZD-3: bootstrap deadly_corridor (scenario with visible movement) for a better public clip. Reuse the VZD-1 recipe: vzd_ppo_train.py generalized to take --env-id, train the PPO teacher (gamma 0.99, gray stride obs, skip 4, stack 4), eval, record a clip with vzd_ppo_watch.py. deadly_corridor is known-harder (corridor navigation, reward shaping may be needed); if the flat recipe stalls, the pre-registered lever is the scenario's living_reward/death penalty config, not more steps. After VZD-3: the ammo-efficiency reward-shaping experiment on defend_the_center.
+**Next action:** When DONE sentinel appears in runs\vzd\ppo_deadly_corridor: read summary.json (30-ep mean/IQM), judge against training curve (no pre-registered numeric bar for this scenario; smoke-untrained was ~767 at skill 3), record clip with vzd_ppo_watch.py --env-id VizdoomDeadlyCorridor-v1 --record, update README results table. If the run stalled, pre-registered levers in priority order: (1) --doom-skill curriculum 1->3->5, (2) scenario reward config (living_reward/death_penalty), (3) reward normalization/scaling (VecNormalize or wrapper) - added this session because early train stats showed approx_kl ~0.39 and clip_fraction ~0.55 at clip_range 0.1 with value_loss ~7e3, consistent with the ~1000x reward scale vs defend. NOT more steps.
 
 **Blockers:** None requiring Jeff.
 
 **Notes:**
 
-- Pairing rule: a student trained from teacher rollouts MUST be evaluated with --obs rgb2. The native GRAY8 render is a different pixel distribution; mixing them invalidates the comparison. Human-demo students stay on native.
-- Desktop Commander transport dies on any blocking tool call at/over ~4 minutes, hard ceiling, worse under ViZDoom load. It self-recovers and background processes survive. Launch with file logging (*> redirect), poll with instant reads only, never block on the pipe.
-- defend_the_center has no movement actions by design (turn/attack only); stationary clips are the scenario ceiling, not a policy defect. deadly_corridor is the queued fix for visible navigation footage.
-- ppo_defend\summary.json recipe string says gray84x112; the model artifact is the authority: obs space (4,60,80), matches current trainer source. Stale label only, numbers in it are good.
-- Monitor for vzd runs: runs\vzd\ppo_defend\monitor.html on 127.0.0.1:8791 via runs\_launch_monitor_vzd.py (one server at a time on 8791). PowerShell *> logs are UTF-16; read_file renders them with spacing artifacts but readable.
+- Monitor: http://127.0.0.1:8791/monitor.html now serves runs\vzd ROOT (new runs\_launch_monitor_vzd_root.py, server pid 33916, old ppo_defend-rooted server killed). runs\vzd\monitor.html points at the corridor log/summary and decodes UTF-16 PowerShell logs (BOM sniff + null-byte heuristic in JS).
+- DC relay failure mode seen today: relay can return "No approval received"/"No devices available" while the device still EXECUTES the call (verified in ~/.claude-server-commander/tool-history.jsonl). If relay errors return, treat DC as write-only: issue commands with file redirects, read results via Filesystem MCP. Registry last_seen is unreliable.
+- Pairing rule stands: rollout-trained students eval with --obs rgb2; human-demo students native.
+- deadly_corridor ground truth: env id VizdoomDeadlyCorridor-v1, cfg skill 5, death_penalty 100, no living_reward, reward = WAD distance shaping toward armor, 7 buttons -> Discrete(8), timeout 2100 tics.
+- DC transport still dies on blocking calls >= ~4 min; launch with *> file logging, poll with instant reads only. PowerShell *> logs are UTF-16.
