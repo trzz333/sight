@@ -24,6 +24,7 @@ import vizdoom as vzd
 from scipy.stats import trim_mean
 
 from vzd_bc_train import VzdBCNet, STACK
+from vzd_rollout_dataset import derive_student_frame
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -36,6 +37,10 @@ def main() -> None:
     ap.add_argument("--frame-skip", type=int, default=4)
     ap.add_argument("--watch", action="store_true")
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--obs", choices=["native", "rgb2"], default="native",
+                    help="native: GRAY8 160x120 render (human-demo pipeline); "
+                         "rgb2: RGB 320x240 render, mean-gray stride-2 "
+                         "(teacher-rollout pipeline, matches vzd_rollout_dataset)")
     args = ap.parse_args()
 
     pol_path = Path(args.policy) if args.policy else \
@@ -50,8 +55,12 @@ def main() -> None:
     game.load_config(os.path.join(vzd.scenarios_path, args.scenario + ".cfg"))
     game.set_window_visible(args.watch)
     game.set_mode(vzd.Mode.PLAYER)
-    game.set_screen_resolution(vzd.ScreenResolution.RES_160X120)
-    game.set_screen_format(vzd.ScreenFormat.GRAY8)
+    if args.obs == "rgb2":
+        game.set_screen_resolution(vzd.ScreenResolution.RES_320X240)
+        game.set_screen_format(vzd.ScreenFormat.RGB24)
+    else:
+        game.set_screen_resolution(vzd.ScreenResolution.RES_160X120)
+        game.set_screen_format(vzd.ScreenFormat.GRAY8)
     game.init()
 
     rewards, lengths = [], []
@@ -65,7 +74,10 @@ def main() -> None:
             if st is None:
                 game.advance_action()
                 continue
-            f = st.screen_buffer.astype(np.float32) / 255.0
+            if args.obs == "rgb2":
+                f = derive_student_frame(st.screen_buffer).astype(np.float32) / 255.0
+            else:
+                f = st.screen_buffer.astype(np.float32) / 255.0
             while len(stack) < STACK:
                 stack.append(f)
             stack.append(f)
@@ -83,6 +95,7 @@ def main() -> None:
 
     r = np.array(rewards, float)
     res = {"scenario": args.scenario, "episodes": args.episodes,
+           "obs": args.obs,
            "mean_reward": float(r.mean()), "iqm_reward": float(trim_mean(r, 0.25)),
            "std_reward": float(r.std()), "mean_len": float(np.mean(lengths)),
            "policy": str(pol_path)}
