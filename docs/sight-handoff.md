@@ -4,20 +4,20 @@ Canonical handoff document. Updated at the end of every session by whoever execu
 
 ---
 
-**Phase:** VZD-1 complete (ViZDoom defend_the_center PPO teacher trained, evaluated, packaged; Godot Signal Dodge closed with imitation as the standing solution)
+**Phase:** VZD-2 complete (teacher-to-student distillation on defend_the_center; VZD-1 teacher and Godot Signal Dodge imitation both stand)
 
-**Last commit:** 09ec084 vzd: teacher results + resume packaging
+**Last commit:** 9d469bf vzd: VZD-2 teacher-to-student distillation, student matches teacher
 
-**Current task:** None in flight. VZD teacher finished at 2.25M total steps (SB3 resume gotcha: reset_num_timesteps=False ADDS --steps to the checkpoint count; documented in the trainer docstring). Eval of record: mean 12.17 / IQM 12.75 kills per episode, 30 deterministic eps, rewards 7-15 with the 15 ceiling hit 13/30. 30s clip at runs\vzd\ppo_defend\gameplay.mp4 (640x480). Resume packaging shipped: README results table (every number re-verified against on-disk summaries this session, Spearman -0.19 and median 573->393 recomputed from the 1M/5M Godot summaries), gamma/critic-collapse story, docs\vzd-ppo-teacher-findings.md.
+**Current task:** None in flight. VZD-2 shipped end to end this session. tools\vzd_rollout_dataset.py rolls the PPO teacher out in its exact training env chain and writes a BC dataset schema-identical to the LMP extractor (student frames mean-gray stride-2 120x160 of the 240x320 RGB screen, labels from game.get_last_action). 100 episodes, 20469 samples, teacher rollout mean 12.55 / IQM 13.26. vzd_bc_eval.py gained --obs rgb2 so student eval matches the dataset derivation. Student (93.4% val action match) evals at mean 12.57 / IQM 13.31 over 30 eps vs teacher of record 12.17 / 12.75. Distillation lossless within noise; both near the 15-kill scenario ceiling. README results table and methods line updated.
 
-**Next action:** VZD-2: teacher-to-student distillation on defend_the_center. Roll out the trained teacher (runs\vzd\ppo_defend\model.zip) to generate a demo dataset via a rollout-extract tool (adapt vzd_extract_dataset.py to consume policy rollouts instead of LMP replays), train the BC student with vzd_bc_train.py, eval with vzd_bc_eval.py, report student-vs-teacher mean/IQM. Resume-legible framing: distillation pipeline, what survives compression. Follow-on arc after that: deadly_corridor scenario (visible movement for a better clip) and an ammo-efficiency reward-shaping experiment (Jeff's observation: 26 rounds, 12-15 kills, no ammo term in the reward, so no pressure to conserve).
+**Next action:** VZD-3: bootstrap deadly_corridor (scenario with visible movement) for a better public clip. Reuse the VZD-1 recipe: vzd_ppo_train.py generalized to take --env-id, train the PPO teacher (gamma 0.99, gray stride obs, skip 4, stack 4), eval, record a clip with vzd_ppo_watch.py. deadly_corridor is known-harder (corridor navigation, reward shaping may be needed); if the flat recipe stalls, the pre-registered lever is the scenario's living_reward/death penalty config, not more steps. After VZD-3: the ammo-efficiency reward-shaping experiment on defend_the_center.
 
 **Blockers:** None requiring Jeff.
 
 **Notes:**
 
-- defend_the_center action space is turn-left / turn-right / attack only; the player is fixed at center by scenario design. Lack of movement in the clip is the scenario ceiling, not a policy defect. Visible navigation requires a different scenario (deadly_corridor queued).
-- Monitor for the vzd run: runs\vzd\ppo_defend\monitor.html served detached on 127.0.0.1:8791 (relaunch via runs\_launch_monitor_vzd.py). Godot monitor server script remains at runs\_monitor_server.py (port collision: only one at a time on 8791).
-- PowerShell here-string footgun: the closing '@ terminator must be alone at column 0; commands on the same line wedge the session in continuation mode. Commit messages go through a temp file written by write_file, never inline here-strings through interact_with_process.
-- Run-death postmortem stands: never kill_process near a live training run. The one death this cycle was self-inflicted at 772k; resume + checkpoints salvaged it.
-- Stale-sentinel rule stands: smoke runs take --out to a scratch dir.
+- Pairing rule: a student trained from teacher rollouts MUST be evaluated with --obs rgb2. The native GRAY8 render is a different pixel distribution; mixing them invalidates the comparison. Human-demo students stay on native.
+- Desktop Commander transport dies on any blocking tool call at/over ~4 minutes, hard ceiling, worse under ViZDoom load. It self-recovers and background processes survive. Launch with file logging (*> redirect), poll with instant reads only, never block on the pipe.
+- defend_the_center has no movement actions by design (turn/attack only); stationary clips are the scenario ceiling, not a policy defect. deadly_corridor is the queued fix for visible navigation footage.
+- ppo_defend\summary.json recipe string says gray84x112; the model artifact is the authority: obs space (4,60,80), matches current trainer source. Stale label only, numbers in it are good.
+- Monitor for vzd runs: runs\vzd\ppo_defend\monitor.html on 127.0.0.1:8791 via runs\_launch_monitor_vzd.py (one server at a time on 8791). PowerShell *> logs are UTF-16; read_file renders them with spacing artifacts but readable.
