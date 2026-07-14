@@ -4,20 +4,20 @@ Canonical handoff document. Updated at the end of every session by whoever execu
 
 ---
 
-**Phase:** VZD-3 in flight (deadly_corridor PPO teacher training; VZD-2 distillation and all prior results stand)
+**Phase:** VZD-3 curriculum stage 1 in flight (deadly_corridor skill-3 PPO; skill-5 flat baseline complete and FAILED)
 
-**Last commit:** 715028f vzd: generalize PPO trainer/watcher to --env-id and --doom-skill for VZD-3
+**Last commit:** 301a529 chore: refresh handoff, VZD-3 deadly_corridor baseline run live at 715028f
 
-**Current task:** VZD-3 baseline run LIVE, launched 2026-07-12 ~10:40 CDT: vzd_ppo_train.py --env-id VizdoomDeadlyCorridor-v1 --steps 1500000, skill 5 (cfg default, the honest baseline), out runs\vzd\ppo_deadly_corridor, log runs\vzd\ppo_deadly_corridor_train.log. At 57k steps it ran ~113 fps, ETA ~3.5-4h. Both smokes passed pre-launch: corridor skill-3 smoke (reward ~767 scale sane, doom_skill recorded in summary) and defend default smoke (dirs and schema unchanged), scratch dirs runs\vzd\_smoke_*. Generalization committed at 715028f.
+**Current task:** Skill-5 flat baseline VERDICT: policy collapse, not reward-scale instability. Eval mean 130.5 / IQM 93.6 over 30 eps; 14/30 episodes identical 94.95 (deterministic sprint-and-die). Training forensics (runs\vzd\_parse_corridor_log.py): ep_len_mean pinned ~14 agent steps (~1.7s) all run, approx_kl and clip_fraction collapsed to 0.0 early and stayed, explained_variance fine (~0.6). Diagnosis: premature convergence to sprint-forward local optimum at skill 5, gradients vanished. Reward normalization demoted (no instability present). Failure clip recorded: runs\vzd\ppo_deadly_corridor\gameplay_fail_s5.mp4 (11.9s, before/after material). Baseline artifacts preserved in runs\vzd\ppo_deadly_corridor (evidence, do not overwrite). CURRICULUM STAGE 1 LAUNCHED 2026-07-12 ~15:20 CDT: --doom-skill 3 --steps 1500000 --out runs\vzd\ppo_deadly_corridor_s3, log runs\vzd\ppo_deadly_corridor_s3_train.log, ~4.3h at ~97 fps. Start entropy -2.07 (healthy, near-uniform).
 
-**Next action:** When DONE sentinel appears in runs\vzd\ppo_deadly_corridor: read summary.json (30-ep mean/IQM), judge against training curve (no pre-registered numeric bar for this scenario; smoke-untrained was ~767 at skill 3), record clip with vzd_ppo_watch.py --env-id VizdoomDeadlyCorridor-v1 --record, update README results table. If the run stalled, pre-registered levers in priority order: (1) --doom-skill curriculum 1->3->5, (2) scenario reward config (living_reward/death_penalty), (3) reward normalization/scaling (VecNormalize or wrapper) - added this session because early train stats showed approx_kl ~0.39 and clip_fraction ~0.55 at clip_range 0.1 with value_loss ~7e3, consistent with the ~1000x reward scale vs defend. NOT more steps.
+**Next action:** When DONE appears in runs\vzd\ppo_deadly_corridor_s3: bar is IQM decisively above BOTH the skill-5 collapse (93.6) and the untrained-skill-3 smoke (~767), with ep_len_mean well above 14. If passed: stage 2 = resume the s3 checkpoint at skill 5 (vzd_ppo_train.py --resume runs\vzd\ppo_deadly_corridor_s3\model.zip --doom-skill 5 --out runs\vzd\ppo_deadly_corridor_s5ft; NOTE --resume treats --steps as ADDITIONAL steps, verify from log), then eval, clip, README results table with the fail->curriculum narrative. If stage 1 fails at skill 3: method has now failed twice flat, next is skill 1 AND revisit ent_coef/exploration, not a retry.
 
 **Blockers:** None requiring Jeff.
 
 **Notes:**
 
-- Monitor: http://127.0.0.1:8791/monitor.html now serves runs\vzd ROOT (new runs\_launch_monitor_vzd_root.py, server pid 33916, old ppo_defend-rooted server killed). runs\vzd\monitor.html points at the corridor log/summary and decodes UTF-16 PowerShell logs (BOM sniff + null-byte heuristic in JS).
-- DC relay failure mode seen today: relay can return "No approval received"/"No devices available" while the device still EXECUTES the call (verified in ~/.claude-server-commander/tool-history.jsonl). If relay errors return, treat DC as write-only: issue commands with file redirects, read results via Filesystem MCP. Registry last_seen is unreliable.
-- Pairing rule stands: rollout-trained students eval with --obs rgb2; human-demo students native.
-- deadly_corridor ground truth: env id VizdoomDeadlyCorridor-v1, cfg skill 5, death_penalty 100, no living_reward, reward = WAD distance shaping toward armor, 7 buttons -> Discrete(8), timeout 2100 tics.
-- DC transport still dies on blocking calls >= ~4 min; launch with *> file logging, poll with instant reads only. PowerShell *> logs are UTF-16.
+- Monitor: http://127.0.0.1:8791/monitor.html re-pointed to the s3 run (serves runs\vzd root, server pid 33916).
+- DC relay failure mode: relay can error ("No approval received"/"No devices available") while the device still executes; verified via tool-history.jsonl. Fallback: DC write-only with *> redirects, read via Filesystem MCP. Registry last_seen unreliable.
+- vzd_ppo_watch.py output is block-buffered under *> redirect (no -u); log lands at exit, poll for the artifact instead.
+- deadly_corridor ground truth: VizdoomDeadlyCorridor-v1, cfg skill 5, death_penalty 100, no living_reward, WAD distance shaping, Discrete(8), timeout 2100 tics. Skill-3 untrained ~767.
+- DC transport dies on blocking calls >= ~4 min; *> file logging, instant reads only. PowerShell *> logs are UTF-16 (monitor.html decodes; _parse_corridor_log.py decodes).
