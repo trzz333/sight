@@ -77,6 +77,71 @@ class SkipFrames(gym.Wrapper):
         return obs, total, terminated, truncated, info
 
 
+class SafeDoom(gym.Wrapper):
+    """Rebuild the ViZDoom engine in-process when its binary dies.
+
+    ViZDoom instances die stochastically under multi-instance load and the rate
+    scales with instance count (Farama-Foundation/ViZDoom#169, open since 2017,
+    no upstream fix; issue #430 confirms the exception just means "the binary
+    died", cause unrecoverable from Python). Under SubprocVecEnv an uncaught
+    engine fault kills the worker, the parent's pipe EOFs, and the entire run
+    dies. Both shaped corridor runs died exactly this way, at ~47k and ~290k
+    steps, while the policy itself was healthy.
+
+    Catching the fault at the env boundary drops the cost of an engine death
+    from "run over" to "one episode lost". Only ViZDoom's own exception types
+    are caught; anything else still surfaces.
+    """
+
+    def __init__(self, make_base, max_rebuilds: int = 100):
+        super().__init__(make_base())
+        self._make_base = make_base
+        self._max_rebuilds = max_rebuilds
+        self.rebuilds = 0
+
+    @staticmethod
+    def _faults():
+        import vizdoom as vzd
+        return (vzd.ViZDoomErrorException, vzd.ViZDoomUnexpectedExitException,
+                vzd.ViZDoomIsNotRunningException, vzd.SharedMemoryException,
+                vzd.MessageQueueException)
+
+    def _rebuild(self, where: str, exc: BaseException) -> None:
+        self.rebuilds += 1
+        print(f"[SafeDoom] engine fault in {where}: {type(exc).__name__}: {exc} "
+              f"-> rebuild {self.rebuilds}/{self._max_rebuilds}", flush=True)
+        if self.rebuilds > self._max_rebuilds:
+            raise RuntimeError("SafeDoom: rebuild budget exhausted") from exc
+        try:
+            self.env.close()
+        except BaseException:
+            pass
+        for attempt in range(5):
+            try:
+                self.env = self._make_base()
+                return
+            except BaseException as e2:
+                print(f"[SafeDoom] rebuild attempt {attempt} failed: {e2}", flush=True)
+                time.sleep(2.0 * (attempt + 1))
+        raise RuntimeError("SafeDoom: could not rebuild engine") from exc
+
+    def reset(self, **kw):
+        try:
+            return self.env.reset(**kw)
+        except self._faults() as e:
+            self._rebuild("reset", e)
+            return self.env.reset(**kw)
+
+    def step(self, action):
+        try:
+            return self.env.step(action)
+        except self._faults() as e:
+            self._rebuild("step", e)
+            obs, info = self.env.reset()
+            info["engine_fault"] = True
+            return obs, 0.0, True, False, info
+
+
 class ShapedCorridorReward(gym.Wrapper):
     """Renotte-style game-variable shaping for deadly_corridor.
 
@@ -107,18 +172,17 @@ class ShapedCorridorReward(gym.Wrapper):
 
     def reset(self, **kw):
         obs, info = self.env.reset(**kw)
-        try:
-            self._prev = self._vars()
-        except Exception:
-            self._prev = (0.0, 0.0, 0.0)
+        self._prev = self._vars()
         return obs, info
 
     def step(self, action):
         obs, r, terminated, truncated, info = self.env.step(action)
-        try:
-            hit, dmg, ammo = self._vars()
-        except Exception:
+        if info.get("engine_fault"):
+            # SafeDoom rebuilt the engine under us; game vars restarted at 0.
+            # Do not shape across that discontinuity.
+            self._prev = (0.0, 0.0, 0.0)
             return obs, r, terminated, truncated, info
+        hit, dmg, ammo = self._vars()
         p_hit, p_dmg, p_ammo = self._prev
         shaped = (r
                   + (hit - p_hit) * self.w_hit
@@ -129,13 +193,29 @@ class ShapedCorridorReward(gym.Wrapper):
         return obs, shaped, terminated, truncated, info
 
 
+def _sibling_vecnormalize(ckpt: Path) -> Path | None:
+    """ppo_x_250000_steps.zip -> ppo_x_vecnormalize_250000_steps.pkl, if present.
+
+    CheckpointCallback(save_vecnormalize=True) writes the stats beside the model
+    with the step count in the name; match on that count so a resume can never
+    silently pair a checkpoint with the wrong return statistics.
+    """
+    import re
+    m = re.search(r"^(.*?)_(\d+)_steps\.zip$", ckpt.name)
+    if not m:
+        return None
+    prefix, steps = m.group(1), m.group(2)
+    p = ckpt.parent / f"{prefix}_vecnormalize_{steps}_steps.pkl"
+    return p if p.exists() else None
+
+
 def make_env(env_id: str, seed: int, doom_skill: int | None = None,
              shape_reward: bool = False):
     def _f():
         import vizdoom.gymnasium_wrapper  # noqa: F401  (registers envs)
         from stable_baselines3.common.monitor import Monitor
         kw = {} if doom_skill is None else {"doom_skill": doom_skill}
-        env = gym.make(env_id, **kw)
+        env = SafeDoom(lambda: gym.make(env_id, **kw))
         if shape_reward:
             env = ShapedCorridorReward(env)
         env = GrayStride(env)
@@ -162,6 +242,9 @@ def main() -> None:
                     help="VecNormalize returns; fixes the corridor value_loss ~5e4 "
                          "that collapses entropy via the shared CNN trunk")
     ap.add_argument("--ent-coef", type=float, default=0.01)
+    ap.add_argument("--ckpt-every", type=int, default=50_000,
+                    help="timesteps between checkpoints; this is the worst-case "
+                         "work lost when the supervisor restarts a dead leg")
     ap.add_argument("--resume", default=None,
                     help="checkpoint .zip to resume from; --steps is ADDITIONAL steps on top "
                          "of the checkpoint (SB3 reset_num_timesteps=False), not a total target")
@@ -180,7 +263,21 @@ def main() -> None:
     venv = VecFrameStack(venv, 4)
     if args.norm_reward:
         from stable_baselines3.common.vec_env import VecNormalize
-        venv = VecNormalize(venv, norm_obs=False, norm_reward=True, clip_reward=10.0)
+        # On resume, restore the running return statistics. A fresh VecNormalize
+        # would restart its std estimate at 1.0 and re-inflate the returns that
+        # collapsed entropy in the first place, so a naive restart would undo
+        # the fix it is meant to protect.
+        vn_pkl = _sibling_vecnormalize(Path(args.resume)) if args.resume else None
+        if vn_pkl is not None:
+            venv = VecNormalize.load(str(vn_pkl), venv)
+            venv.training, venv.norm_reward = True, True
+            print("restored VecNormalize stats from", vn_pkl)
+        else:
+            venv = VecNormalize(venv, norm_obs=False, norm_reward=True,
+                                clip_reward=10.0)
+            if args.resume:
+                print("WARNING: resuming without VecNormalize stats "
+                      "(no sibling .pkl); return scale will re-estimate")
 
     if args.resume:
         model = PPO.load(args.resume, env=venv, device="cuda")
@@ -194,9 +291,11 @@ def main() -> None:
             tensorboard_log=None)
     print("obs space:", venv.observation_space)
 
+    # A checkpoint is the supervisor's restart point, so --ckpt-every is the
+    # worst-case work an engine death can cost.
     cb = None if args.smoke else CheckpointCallback(
-        save_freq=max(250_000 // args.n_envs, 1), save_path=str(out),
-        name_prefix=out_slug(args.env_id))
+        save_freq=max(args.ckpt_every // args.n_envs, 1), save_path=str(out),
+        name_prefix=out_slug(args.env_id), save_vecnormalize=args.norm_reward)
 
     t0 = time.time()
     model.learn(total_timesteps=args.steps, callback=cb, progress_bar=False,
@@ -229,7 +328,8 @@ def main() -> None:
     from scipy.stats import trim_mean
     summary = {
         "env": args.env_id, "doom_skill": args.doom_skill,
-        "steps": args.steps, "n_envs": args.n_envs,
+        "steps": int(model.num_timesteps), "steps_this_leg": args.steps,
+        "n_envs": args.n_envs,
         "seed": args.seed, "train_seconds": round(train_s, 1),
         "steps_per_sec": round(args.steps / train_s, 1),
         "eval_episodes": n_eval, "mean_reward": float(r.mean()),
