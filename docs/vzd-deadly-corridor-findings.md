@@ -147,3 +147,93 @@ reward charges damage_taken*10, so a full-health death costs about -1000.
 | skill-3 shaped+norm | + game-var shaping + VecNormalize returns | TBD | in flight |
 | skill-5 resume-finetune | resume shaped weights at skill 5 | TBD | not started |
 
+
+## 6. FOUND-ART on the failure (verdict ADOPT)
+
+Generalized problem, stripped of project vocabulary: *policy entropy collapse in
+PPO driven by large-magnitude returns, where a shared actor-critic trunk lets
+value-loss gradients dominate the policy.* Searches run this turn: "PPO entropy
+collapse large reward scale value loss dominates shared feature extractor";
+"PopArt learning values across many orders of magnitude reward scale
+normalization RL"; "Phasic Policy Gradient shared network interference between
+policy and value function optimization"; "37 implementation details of PPO
+reward scaling normalization VecNormalize".
+
+**FOUND-ART: ADOPT** - this is a textbook, named, documented PPO failure mode,
+and the fix already shipped (VecNormalize return scaling + clip) is the
+canonical published remedy, not a hand-roll. Nothing to build.
+
+Prior art (closest first):
+
+- **Pop-Art, van Hasselt et al., NeurIPS 2016, "Learning values across many
+  orders of magnitude"** [VERIFIED this turn]. Adaptive target normalization for
+  value learning when return magnitude varies by orders of magnitude. Closest
+  theoretical match: it explicitly establishes *an equivalence between
+  normalizing targets and scaling gradients in lower layers*, which is exactly
+  our mechanism (huge value targets -> huge gradients in the shared CNN trunk).
+  Motivated by removing reward clipping in Atari DQN.
+- **"The 37 Implementation Details of PPO", ICLR Blog Track 2022 + CleanRL**
+  [VERIFIED]. Reward scaling via VecNormalize (rewards divided by the std of a
+  rolling discounted sum of returns) then clipped to [-10, 10] is *standard
+  documented PPO practice*, not an exotic lever. This is precisely what we
+  shipped. Maturity: it is the reference implementation lineage.
+- **Phasic Policy Gradient, Cobbe et al. 2020 (OpenAI)** [VERIFIED]. Names the
+  shared-trunk problem directly: any method jointly optimizing policy and value
+  in one network must weight them, and "there is always a risk that the
+  optimization of one objective will interfere with the optimization of the
+  other". Supplies two cheaper levers than PPG itself: detach the value gradient
+  at the last shared layer during the policy phase, or simply lower vf_coef (the
+  Procgen competition winner used 0.25 after finding gradient-stopping unstable).
+- **"Revisiting Design Choices in PPO"** [VERIFIED]. Confirms reward scaling is
+  crucial to PPO's success, and that a simple constant reward scaling can match
+  the more complex return-std scheme.
+- **"No Representation, No Trust: Connecting Representation, Collapse, and Trust
+  Issues in PPO" (arXiv 2405.00662)** [VERIFIED]. Adjacent, not identical:
+  documents PPO feature-rank collapse, growing pre-activation norms, and the
+  resulting breakdown of the clipping trust region. Explicitly notes their rank
+  collapse is *distinct* from typical entropy collapse (it yields high but
+  trivial entropy). Ours is the ordinary entropy collapse, so this is a related
+  failure family, not our case. Recorded to avoid overselling the match.
+
+**Correction this forced on our own mechanism claim.** Earlier phrasing said
+huge advantages swamp the entropy bonus. That part is wrong: SB3 PPO sets
+`normalize_advantage=True` by default and normalizes advantages per minibatch,
+so the policy-gradient path is already scale-free. The pathway that actually
+carries reward scale into the policy is the **shared trunk via value loss**,
+which is exactly what Pop-Art's target-normalization/lower-layer-gradient
+equivalence describes. The mechanism stands; the sloppy version of it does not.
+
+Checked footgun, does NOT apply here: CleanRL flags that using a different gamma
+in the reward-normalization wrapper than in PPO is technically incorrect. Ours
+match (PPO gamma 0.99, SB3 VecNormalize default gamma 0.99).
+
+Gap: the literature settles the optimizer fix. It does not settle the
+corridor-specific questions: whether the 200/10/5 shaping coefficients are right,
+and whether skill-3 -> skill-5 transfer holds. Those stay empirical.
+
+Recommendation: keep VecNormalize (shipped, running). If entropy collapses
+again, escalate in this order, cheapest first: (1) vf_coef 0.5 -> 0.25 (the
+PPG/Procgen-winner lever, one line), (2) raise --ent-coef, (3) detach the value
+gradient at the last shared layer or set share_features_extractor=False. Do NOT
+implement Pop-Art: VecNormalize is the packaged version of the same idea, and
+building it would cost roughly a day to reproduce a wrapper we already import.
+Effort saved by the search: avoided a from-scratch Pop-Art build, and avoided
+the shaping-only path that would have burned another ~4h run on a frozen policy.
+
+## 7. Infra failure: run 1 of the shaped config crashed (2026-07-14 ~23:00)
+
+First shaped+norm launch died at ~47k steps after ~35 minutes with
+`vizdoom.vizdoom.ViZDoomUnexpectedExitException: Controlled ViZDoom instance
+exited unexpectedly`, followed by `BrokenPipeError [WinError 109]` and `EOFError`
+in `SubprocVecEnv.step_wait` as the parent found a dead worker. The Doom engine
+subprocess died inside a normal `env.step`, taking one of the 8 workers and
+therefore the whole run with it.
+
+Root cause confidence LOW. The flat s3 run survived 4h on the same 8-worker
+SubprocVecEnv, so the shaping wrapper is weakly implicated (n=1), but this is
+also a known intermittent ViZDoom failure. Not over-theorized on one sample.
+Relaunched fresh (pid 21264). If it dies the same way again, that is failure
+twice and the method changes: drop `n_envs`, and/or add a supervisor that
+auto-resumes from the newest checkpoint, and/or stop `ShapedCorridorReward.step`
+from silently swallowing exceptions with a bare `except Exception` (which can
+hide the first engine error and is a real defect regardless).
