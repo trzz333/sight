@@ -52,39 +52,98 @@ is being tried first as the single cheapest change; shaping is pre-registered as
 the next change if the curriculum-only transfer stalls, exactly as the prior art
 predicts it might.
 
-## 3. Curriculum stage 1: skill 3, flat reward (IN FLIGHT, no verdict yet)
+## 3. Curriculum stage 1: skill 3, flat reward (COMPLETE, FAILED the bar)
 
 PPO CnnPolicy, gamma 0.99, flat scenario reward, skill 3, 1.5M steps.
-tools/vzd_ppo_train.py --env-id VizdoomDeadlyCorridor-v1 --doom-skill 3
---steps 1500000 --out runs/vzd/ppo_deadly_corridor_s3
+Completed 2026-07-14 14:41, 13,310s train, 112.7 steps/s.
 
-Live curve health at ~88k steps (~6%): ep_rew_mean climbing (last ~1020, already
-above the ~767 untrained smoke), ep_len_mean 44 to 32 as it reaches the armor
-faster, approx_kl and clip_fraction both active. One flag: explained_variance
-pinned near 0.01, so the critic is not yet fitting the high-magnitude, high-variance
-returns. Reward normalization is the pre-registered lever if this persists; not
-applied to a running healthy job on a soft flag alone.
+Result: mean 891.1, **IQM 683.9** over 30 deterministic episodes.
+Pre-registered bar was IQM decisively above BOTH 93.6 (skill-5 flat collapse)
+AND ~767 (untrained skill-3 smoke). IQM 683.9 is BELOW 767. **FAILED.**
+Goalposts not moved: mean (891) clears 767, but the bar was written on IQM and
+IQM is what it is judged on.
 
-Eval bar (pre-registered): IQM decisively above BOTH 93.6 (the skill-5 flat
-collapse) AND ~767 (untrained skill-3 smoke), with ep_len_mean well above 14
-(the collapse floor). TBD: fill from `runs/vzd/ppo_deadly_corridor_s3/summary.json`
-on DONE.
+Distribution is bimodal: 15 of 30 episodes are byte-identical at
+664.1885223388672, and 4 of 30 reach ~2280 (armor reached). The modal value
+664.1885223388672 is *the same float* the untrained 2k-step smoke produced.
+Training did not move the dominant mode; it only added an occasional (13%)
+success mode. Confidence HIGH, from `runs/vzd/ppo_deadly_corridor_s3/summary.json`.
 
-## 4. Curriculum stage 2: resume-finetune at skill 5 (NOT STARTED)
+Methodology defect found: the ~767 anchor came from a **3-episode** smoke
+(`_smoke_corridor.log`, rewards [664.19, 972.32, 664.19]); its "IQM" over 3
+episodes is just the mean. Comparing IQM-of-30 to that is not like-for-like.
+The verdict does not hinge on it (683.9 ~= the untrained modal 664), but a
+30-episode untrained anchor is owed.
 
-If stage 1 passes: resume the stage-1 weights at skill 5.
---resume runs/vzd/ppo_deadly_corridor_s3/model.zip --doom-skill 5
---out runs/vzd/ppo_deadly_corridor_s5ft (--resume treats --steps as ADDITIONAL;
-verify from the log at launch). TBD.
+## 3a. The real mechanism: entropy collapse from reward scale (both flat runs)
 
-If stage 2 fails: add the Renotte-style game-variable shaping wrapper (HEALTH
-already in cfg; verify HITCOUNT/ammo variable names at implementation),
-coefficients per the cited notebook. Then RND/ICM if still stuck.
+Flat reward did not fail because "the reward landscape lacks an incentive to
+fight". It failed because PPO's optimizer broke. From the stage-1 log
+(`_parse_fields.py`):
+
+    entropy_loss   -2.07 -> -0.0 by q1 -> -0.00021 at end
+    value_loss     1.3e3 -> 6.9e4 -> 5.5e4
+    approx_kl      0.0155 -> 0.0 -> 0.0
+    clip_fraction  0.277 -> 0.0 -> 0.0
+
+Entropy went from 2.07 (uniform over 8 actions; ln(8)=2.079) to ~0 within the
+first quarter of training. The policy became a point mass, so the PPO ratio is
+always 1, approx_kl and clip_fraction are 0, and no gradient can move it. The
+last ~1.2M of 1.5M steps were wasted compute on a frozen policy. The identical
+signature is present in the skill-5 flat run.
+
+Mechanism: the corridor reward is ~1000x defend_the_center's scale, so
+value_loss sits at ~5e4. SB3's CnnPolicy **shares the features extractor**
+between value and policy heads, so value-fitting gradients (x vf_coef 0.5)
+swamp the entropy bonus (ent_coef 0.01 x ~2.0) by orders of magnitude and
+saturate the shared trunk. This is the project's own pre-registered
+"high kl/clip_fraction at low clip_range is a reward-scale signature,
+normalize first" rule, which the early blocks show exactly (kl 0.32/1.19/0.84,
+clip_frac 0.77/0.80) before the freeze.
+
+Consequence for the plan: **shaping alone would also have failed.** Adding
+hitcount*200 to an optimizer that saturates by 300k steps changes nothing.
+Reward normalization is a precondition, not an alternative.
+
+## 4. Stage 2 revised: skill 3 + shaping + reward normalization (IN FLIGHT)
+
+The pre-registered next step was "skill 1 + shaping". Revised on two pieces of
+new evidence:
+
+1. Reward normalization is mandatory (section 3a), and was not in that plan.
+2. Skill 1 is trivial: a 2k-step **untrained** policy evals ~2280 at skill 1
+   (`runs/vzd/_smoke_shape`), because nothing meaningfully opposes walking to
+   the vest. A skill-1 eval therefore cannot distinguish "learned to fight"
+   from "walked forward", so it would burn ~4h for an uninformative number.
+
+Running instead: skill 3, `--shape-reward --norm-reward`, 1.5M steps, out
+`runs/vzd/ppo_deadly_corridor_s3_shaped`. Skill 3 contains real combat and
+keeps the eval directly comparable to the flat skill-3 IQM 683.9, making this a
+clean A/B on the two fixes.
+
+Eval is deliberately RAW (unshaped, unnormalized) at the training skill so the
+number stays comparable to 683.9 and 93.6.
+
+Early health at ~47k steps, against the flat run at the same point:
+
+| metric | flat s3 | shaped+norm s3 |
+|---|---|---|
+| value_loss | 5.5e4 | **0.32** |
+| entropy_loss | -> ~0 by q1 | **-2.08 -> -1.89** (still exploring) |
+| approx_kl | 0.0 | **0.001-0.003** |
+| clip_fraction | 0.0 | **0.11** |
+
+Confidence HIGH that the optimizer pathology is fixed; MEDIUM on the outcome.
+Re-check entropy at 300-400k, the point where the flat run had already frozen.
+Note ep_rew_mean is now ~-1000 and not comparable to the flat curve: the shaped
+reward charges damage_taken*10, so a full-health death costs about -1000.
 
 ## 5. Results table (fill on eval, do not pre-populate)
 
-| Stage | Method | Score | Verdict |
+| Stage | Method | Score (raw scenario, 30-ep deterministic) | Verdict |
 |---|---|---|---|
-| skill-5 flat | PPO CnnPolicy gamma 0.99, no curriculum | mean 130.5 / IQM 93.6, 14/30 identical eps | FAILED, sprint-and-die local optimum |
-| skill-3 curriculum s1 | PPO CnnPolicy gamma 0.99, flat reward | TBD | in flight |
-| skill-5 resume-finetune | resume s3 weights at skill 5 | TBD | not started |
+| skill-5 flat | PPO CnnPolicy gamma 0.99, no curriculum | mean 130.5 / IQM 93.6, 14/30 identical eps | FAILED, entropy collapse |
+| skill-3 flat | PPO CnnPolicy gamma 0.99, curriculum only | mean 891.1 / IQM 683.9, 15/30 identical eps | FAILED, IQM below the ~767 untrained anchor; entropy collapse |
+| skill-3 shaped+norm | + game-var shaping + VecNormalize returns | TBD | in flight |
+| skill-5 resume-finetune | resume shaped weights at skill 5 | TBD | not started |
+

@@ -77,12 +77,67 @@ class SkipFrames(gym.Wrapper):
         return obs, total, terminated, truncated, info
 
 
-def make_env(env_id: str, seed: int, doom_skill: int | None = None):
+class ShapedCorridorReward(gym.Wrapper):
+    """Renotte-style game-variable shaping for deadly_corridor.
+
+    shaped = raw_scenario_reward            (WAD distance shaping toward armor)
+             + d(HITCOUNT)     * w_hit      pay for landing shots
+             - d(DAMAGE_TAKEN) * w_dmg      punish getting shot
+             + d(AMMO2)        * w_ammo     d is negative when firing -> punish spray
+
+    Coefficients default to the nicknochnack/DoomReinforcementLearning notebook
+    (200 / 10 / 5). Variables are read via unwrapped.game.get_game_variable(),
+    which works for any variable regardless of what the cfg declares available
+    (deadly_corridor.cfg declares HEALTH only). AMMO2 is the pistol ammo pool;
+    SELECTED_WEAPON_AMMO reads -1 here and is unusable. Verified on vizdoom 1.3.0.
+    """
+
+    def __init__(self, env, w_hit: float = 200.0, w_dmg: float = 10.0,
+                 w_ammo: float = 5.0):
+        super().__init__(env)
+        self.w_hit, self.w_dmg, self.w_ammo = w_hit, w_dmg, w_ammo
+        self._prev = (0.0, 0.0, 0.0)
+
+    def _vars(self):
+        from vizdoom import GameVariable as GV
+        g = self.env.unwrapped.game
+        return (g.get_game_variable(GV.HITCOUNT),
+                g.get_game_variable(GV.DAMAGE_TAKEN),
+                g.get_game_variable(GV.AMMO2))
+
+    def reset(self, **kw):
+        obs, info = self.env.reset(**kw)
+        try:
+            self._prev = self._vars()
+        except Exception:
+            self._prev = (0.0, 0.0, 0.0)
+        return obs, info
+
+    def step(self, action):
+        obs, r, terminated, truncated, info = self.env.step(action)
+        try:
+            hit, dmg, ammo = self._vars()
+        except Exception:
+            return obs, r, terminated, truncated, info
+        p_hit, p_dmg, p_ammo = self._prev
+        shaped = (r
+                  + (hit - p_hit) * self.w_hit
+                  - (dmg - p_dmg) * self.w_dmg
+                  + (ammo - p_ammo) * self.w_ammo)
+        self._prev = (hit, dmg, ammo)
+        info["raw_reward"] = r
+        return obs, shaped, terminated, truncated, info
+
+
+def make_env(env_id: str, seed: int, doom_skill: int | None = None,
+             shape_reward: bool = False):
     def _f():
         import vizdoom.gymnasium_wrapper  # noqa: F401  (registers envs)
         from stable_baselines3.common.monitor import Monitor
         kw = {} if doom_skill is None else {"doom_skill": doom_skill}
         env = gym.make(env_id, **kw)
+        if shape_reward:
+            env = ShapedCorridorReward(env)
         env = GrayStride(env)
         env = SkipFrames(env, 4)
         env = Monitor(env)  # emits ep_rew_mean / ep_len_mean to the log
@@ -101,8 +156,15 @@ def main() -> None:
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--out", default=None)
     ap.add_argument("--smoke", action="store_true")
+    ap.add_argument("--shape-reward", action="store_true",
+                    help="game-variable shaping (hit/damage/ammo); train-only, eval stays raw")
+    ap.add_argument("--norm-reward", action="store_true",
+                    help="VecNormalize returns; fixes the corridor value_loss ~5e4 "
+                         "that collapses entropy via the shared CNN trunk")
+    ap.add_argument("--ent-coef", type=float, default=0.01)
     ap.add_argument("--resume", default=None,
-                    help="checkpoint .zip to resume from; --steps stays the TOTAL target incl. checkpoint steps")
+                    help="checkpoint .zip to resume from; --steps is ADDITIONAL steps on top "
+                         "of the checkpoint (SB3 reset_num_timesteps=False), not a total target")
     args = ap.parse_args()
 
     from stable_baselines3 import PPO
@@ -112,9 +174,13 @@ def main() -> None:
     out = Path(args.out) if args.out else REPO_ROOT / "runs" / "vzd" / out_slug(args.env_id)
     out.mkdir(parents=True, exist_ok=True)
 
-    venv = SubprocVecEnv([make_env(args.env_id, args.seed + i, args.doom_skill)
+    venv = SubprocVecEnv([make_env(args.env_id, args.seed + i, args.doom_skill,
+                                   args.shape_reward)
                           for i in range(args.n_envs)])
     venv = VecFrameStack(venv, 4)
+    if args.norm_reward:
+        from stable_baselines3.common.vec_env import VecNormalize
+        venv = VecNormalize(venv, norm_obs=False, norm_reward=True, clip_reward=10.0)
 
     if args.resume:
         model = PPO.load(args.resume, env=venv, device="cuda")
@@ -124,7 +190,7 @@ def main() -> None:
             "CnnPolicy", venv, verbose=1, seed=args.seed,
             n_steps=256, batch_size=512, learning_rate=2.5e-4,
             gamma=0.99, gae_lambda=0.95, clip_range=0.1,
-            ent_coef=0.01, vf_coef=0.5, n_epochs=4, device="cuda",
+            ent_coef=args.ent_coef, vf_coef=0.5, n_epochs=4, device="cuda",
             tensorboard_log=None)
     print("obs space:", venv.observation_space)
 
@@ -139,9 +205,12 @@ def main() -> None:
     model.save(out / "model.zip")
     venv.close()
 
-    # deterministic eval, fresh single env
+    # deterministic eval, fresh single env.
+    # Deliberately RAW: no shaping, no VecNormalize. The eval number must stay
+    # comparable to the flat-run baselines (skill-5 IQM 93.6, skill-3 IQM 683.9).
     from stable_baselines3.common.vec_env import DummyVecEnv
-    ev = VecFrameStack(DummyVecEnv([make_env(args.env_id, 10_000, args.doom_skill)]), 4)
+    ev = VecFrameStack(DummyVecEnv([make_env(args.env_id, 10_000, args.doom_skill,
+                                             shape_reward=False)]), 4)
     rewards = []
     n_eval = 3 if args.smoke else 30
     obs = ev.reset()
@@ -165,7 +234,11 @@ def main() -> None:
         "steps_per_sec": round(args.steps / train_s, 1),
         "eval_episodes": n_eval, "mean_reward": float(r.mean()),
         "iqm_reward": float(trim_mean(r, 0.25)), "rewards": rewards,
-        "gamma": 0.99, "recipe": "PPO CnnPolicy gray60x80 skip4 stack4"}
+        "gamma": 0.99, "ent_coef": args.ent_coef,
+        "shape_reward": bool(args.shape_reward),
+        "norm_reward": bool(args.norm_reward),
+        "eval_reward": "raw scenario (unshaped, unnormalized)",
+        "recipe": "PPO CnnPolicy gray60x80 skip4 stack4"}
     (out / "summary.json").write_text(json.dumps(summary, indent=2))
     (out / "DONE").write_text("ok")
     print(json.dumps(summary, indent=2))
