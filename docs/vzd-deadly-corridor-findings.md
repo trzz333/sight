@@ -105,7 +105,7 @@ Consequence for the plan: **shaping alone would also have failed.** Adding
 hitcount*200 to an optimizer that saturates by 300k steps changes nothing.
 Reward normalization is a precondition, not an alternative.
 
-## 4. Stage 2 revised: skill 3 + shaping + reward normalization (IN FLIGHT)
+## 4. Stage 2 revised: skill 3 + shaping + reward normalization (COMPLETE, PASSED)
 
 The pre-registered next step was "skill 1 + shaping". Revised on two pieces of
 new evidence:
@@ -138,13 +138,65 @@ Re-check entropy at 300-400k, the point where the flat run had already frozen.
 Note ep_rew_mean is now ~-1000 and not comparable to the flat curve: the shaped
 reward charges damage_taken*10, so a full-health death costs about -1000.
 
+### 4a. Result (VERIFIED, PASSED the bar)
+
+Completed 2026-07-15 20:08, 1,501,472 steps, 8,445.7s train, 118.4 steps/s,
+from `runs/vzd/ppo_deadly_corridor_s3_shaped/summary.json`.
+
+**mean 2279.14 / IQM 2279.43** over 30 deterministic raw episodes, against the
+pre-registered bar of IQM decisively above the flat skill-3 IQM 683.9 (same
+skill, same raw eval). That is 3.3x the bar. **PASSED**, and it also clears the
+~767 untrained skill-3 anchor by 3x, so the section-3 methodology defect in
+that anchor does not affect the verdict.
+
+The distribution is the point. Every one of the 30 episodes lands in
+2276.2-2281.6, i.e. **30/30 reach the armor**. The flat skill-3 run reached
+~2280 in **4/30** and sat at the untrained modal 664.1885 in 15/30. So the two
+fixes moved the dominant mode, which is exactly what stage 1 failed to do.
+Same tight-cluster signature as the flat run's byte-identical 664.1885, but on
+the success mode instead of the failure mode: deterministic policy, deterministic
+map, so a repeated float is expected and is not evidence of degeneracy here.
+
+Optimizer health at end, against the flat run's frozen signature:
+
+| metric | flat s3 (failed) | shaped+norm s3 |
+|---|---|---|
+| entropy_loss | -2.07 -> **-0.0002** (frozen) | -2.08 -> **-0.0802** |
+| approx_kl | -> **0.0** | **0.0028** (nonzero) |
+| clip_fraction | -> **0.0** | **0.0317** (nonzero) |
+| value_loss | 5.5e4 | **0.00996** |
+| explained_variance | fine while frozen | **0.972** |
+| ep_rew_mean | flat | **-1160 -> 3120** monotone |
+
+Entropy did decay hard (-2.08 to -0.08). That is convergence, not the section-3a
+collapse: the flat run froze at *exactly* zero kl/clip_fraction while reward went
+nowhere, whereas here kl and clip_fraction stay nonzero and reward climbs
+monotonically to 3120 with the critic at 0.972. The policy sharpened onto a
+solution that works.
+
+**What this does NOT establish (UNKNOWN, and it matters).**
+
+1. **Fight or run past.** Section 2's prior art flags precisely this: skill-3
+   success can be combat-free. The raw eval reward is distance plus death
+   penalty, so 2279.5 is consistent with "sprinted to the vest without dying"
+   and does not prove the agent learned to kill anything. HITCOUNT at eval was
+   not recorded. This is the load-bearing question for the skill-5 step and it
+   is currently unanswered.
+2. **Single seed.** n=1. The eval is deterministic on a deterministic map, so
+   IQM over 30 episodes measures which mode this one policy landed in, not a
+   distribution over training runs. A decisive claim needs multiple seeds, not
+   more episodes. Do not over-read one clear.
+3. **Low entropy leaves little headroom.** A near-deterministic policy (-0.08)
+   has little exploration left to adapt at skill 5. The resume-finetune step may
+   need entropy re-injection (raise --ent-coef on resume).
+
 ## 5. Results table (fill on eval, do not pre-populate)
 
 | Stage | Method | Score (raw scenario, 30-ep deterministic) | Verdict |
 |---|---|---|---|
 | skill-5 flat | PPO CnnPolicy gamma 0.99, no curriculum | mean 130.5 / IQM 93.6, 14/30 identical eps | FAILED, entropy collapse |
 | skill-3 flat | PPO CnnPolicy gamma 0.99, curriculum only | mean 891.1 / IQM 683.9, 15/30 identical eps | FAILED, IQM below the ~767 untrained anchor; entropy collapse |
-| skill-3 shaped+norm | + game-var shaping + VecNormalize returns | TBD | in flight |
+| skill-3 shaped+norm | + game-var shaping + VecNormalize returns | mean 2279.1 / IQM 2279.4, 30/30 armor reached | **PASSED**, 3.3x the 683.9 bar; single seed, combat UNKNOWN |
 | skill-5 resume-finetune | resume shaped weights at skill 5 | TBD | not started |
 
 
@@ -237,3 +289,58 @@ twice and the method changes: drop `n_envs`, and/or add a supervisor that
 auto-resumes from the newest checkpoint, and/or stop `ShapedCorridorReward.step`
 from silently swallowing exceptions with a bare `except Exception` (which can
 hide the first engine error and is a real defect regardless).
+
+## 8. Infra, resolved: it was never ViZDoom (2026-07-15)
+
+Runs 2 and 3 died the same way, at ~290k and ~500k. Diagnosis at 3db4777 was
+"stochastic ViZDoom engine death" and SafeDoom was shipped for it. **That
+diagnosis was wrong.** Recorded because the error cost three runs.
+
+Evidence against it, gathered after run 3:
+
+- **Zero `[SafeDoom]` rebuilds in the completed 1.5M-step run**, and zero in
+  run 3's 500k. If engines were dying at the rate ViZDoom#169 describes, the
+  wrapper would have caught and logged some. It never fired once.
+- **No worker-side traceback** in any crash. The worker did not raise, it
+  vanished. SafeDoom only catches faults that surface as Python exceptions.
+- **The supervisor died too**, and so did the monitor server, which shares
+  nothing with the training tree. Every python process on the box went at once.
+- Ruled out by tool output: Claude Desktop / MCP restart (up since 07:45),
+  sleep/wake (no Kernel-Power events, wake count 0), Application error events
+  (none), vizdoom crash dumps (none).
+
+**Method defect that produced the wrong answer.** The SafeDoom fault-injection
+test called `game.close()` and asserted the resulting
+`ViZDoomIsNotRunningException` was caught. That exercises the path the fix was
+built for, not the path that was failing. It produced confidence, not evidence.
+The rule this earns: verify against the observed failure signature, not against
+the fix.
+
+**The change that worked: OS-owned processes.** FOUND-ART ADOPT, search
+"Windows keep process running after parent exits scheduled task vs NSSM
+service". Task Scheduler is the built-in packaged answer (NSSM is equivalent
+plus a dependency). Nothing built. Detached children had died 3x for training
+and 3x for the monitor; the method changed rather than the retry count.
+
+- `runs\vzd\_run_s3_shaped_task.cmd` + schtasks `Sight-VZD3`.
+- `runs\_run_monitor_task.cmd` + schtasks `Sight-Monitor`.
+- `/RL HIGHEST` needs elevation and was dropped. Normal privilege is still
+  OS-owned, which is the property that matters.
+
+Result: the run completed 1.0M steps in a single leg, 8,641s, rc=0, zero
+restarts, zero engine faults. Confidence that Task Scheduler is the fix:
+**MEDIUM, not HIGH.** n=1 against three detached failures is suggestive, not
+proof, and the root cause of the mass kill remains **UNKNOWN**. `nhi`
+(Thunderbolt) 9007/9008 events bracket the run-3 death at 16:59 and 17:08 but
+are not decisive. If it recurs, the supervisor now writes a timestamped
+`supervisor.log` and a `SUP_HEARTBEAT` file: a stalled heartbeat with no
+"leg N exited rc=" line proves killed rather than crashed, which run 3 could
+not distinguish.
+
+Kept regardless: SafeDoom (cheap, verified on its own path, a recoverable
+engine exit is still worth catching), checkpoints every 50k with
+`save_vecnormalize=True`, and the supervisor. The resume path was exercised for
+real: run 4 restored VecNormalize stats from the step-matched 500k `.pkl` and
+continued to 1.5M. Without that, a restart re-estimates the return std from 1.0
+and re-inflates the returns whose scale caused the section-3a collapse, so a
+naive restart would undo the fix it exists to protect.
