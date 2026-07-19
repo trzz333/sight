@@ -4,7 +4,7 @@ Canonical handoff document. Updated at the end of every session by whoever execu
 
 ---
 
-**Phase:** VZD-3 deadly_corridor COMPLETE. Both stages passed and combat-verified. Seeds owed before any README transfer claim.
+**Phase:** VZD-3 deadly_corridor COMPLETE. Both stages passed and combat-verified. Seeds owed before any README transfer claim. **Machine: MSI Raider 18 HX A14VHG (hostname MSI, RTX 4080 Laptop 12GB) as of 2026-07-19; StrongerJr retired as the Sight box. Seed1 run and all monitor infra live here.**
 
 **Last commit:** 8a94b76 vzd: skill-5 combat probe FIGHT (kills_mean 5.83, 30/30 with a kill, 1 death) - VZD-3 caveat resolved, findings 4b + results table
 
