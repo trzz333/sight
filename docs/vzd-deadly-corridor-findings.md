@@ -176,12 +176,27 @@ solution that works.
 
 **What this does NOT establish (UNKNOWN, and it matters).**
 
-1. **Fight or run past.** Section 2's prior art flags precisely this: skill-3
-   success can be combat-free. The raw eval reward is distance plus death
-   penalty, so 2279.5 is consistent with "sprinted to the vest without dying"
-   and does not prove the agent learned to kill anything. HITCOUNT at eval was
-   not recorded. This is the load-bearing question for the skill-5 step and it
-   is currently unanswered.
+1. **Fight or run past. RESOLVED 2026-07-18: FIGHT (HIGH).** A 30-episode
+   deterministic raw eval at skill 3 of `ppo_deadly_corridor_s3_shaped/model.zip`,
+   instrumented with the engine's own counters via
+   `unwrapped.game.get_game_variable()` (`tools/vzd_probe_combat.py`,
+   `combat_probe.json`), gives **5 kills / 5 hits every one of 30 episodes,
+   0 deaths, mean final health 91.4/100**. Not combat-free. The probe reproduced
+   `summary.json` to four decimals from independently written code (mean
+   2279.1444 vs 2279.1443, IQM 2279.4275 vs 2279.4274), which re-verifies the
+   stage-2 eval itself. A tic-level trace (`tools/vzd_trace_combat.py`,
+   `_trace_combat.log`) then killed an intermediate wrong hypothesis of mine:
+   seeing DAMAGECOUNT ~45 across 5 kills, I guessed KILLCOUNT was crediting
+   monster infighting. The trace falsified it: every KILLCOUNT increment lands
+   on the *same tic* as a HITCOUNT increment and a -1 on AMMO2. One bullet, one
+   hit, one kill, five times. My "20-HP zombieman" premise was simply wrong; a
+   single 5-damage pistol hit kills these. Metric caveat: `SHOTS_FIRED`/
+   `accuracy` in `combat_probe.json` are contaminated (the AMMO2 baseline read
+   at reset() inherits the prior episode's terminal value, giving impossible
+   accuracy 1.007 and SHOTS_FIRED=1 on two episodes); KILLCOUNT/HITCOUNT/
+   DAMAGE_TAKEN are clean (episode 1 is the process's first, nothing to inherit,
+   and reads 5 kills; DAMAGE_TAKEN falls between episodes, which a stale max
+   forbids). The trace's per-tic AMMO2 read shows true accuracy 5/5 to 5/6.
 2. **Single seed.** n=1. The eval is deterministic on a deterministic map, so
    IQM over 30 episodes measures which mode this one policy landed in, not a
    distribution over training runs. A decisive claim needs multiple seeds, not

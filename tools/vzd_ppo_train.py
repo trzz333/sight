@@ -241,7 +241,11 @@ def main() -> None:
     ap.add_argument("--norm-reward", action="store_true",
                     help="VecNormalize returns; fixes the corridor value_loss ~5e4 "
                          "that collapses entropy via the shared CNN trunk")
-    ap.add_argument("--ent-coef", type=float, default=0.01)
+    ap.add_argument("--ent-coef", type=float, default=None,
+                    help="entropy bonus; default 0.01 fresh. On --resume this "
+                         "OVERRIDES the checkpoint's saved ent_coef (PPO.load "
+                         "restores it), which is the lever for re-opening "
+                         "exploration on a converged policy")
     ap.add_argument("--ckpt-every", type=int, default=50_000,
                     help="timesteps between checkpoints; this is the worst-case "
                          "work lost when the supervisor restarts a dead leg")
@@ -281,8 +285,18 @@ def main() -> None:
 
     if args.resume:
         model = PPO.load(args.resume, env=venv, device="cuda")
+        # PPO.load restores the CHECKPOINT's ent_coef, so --ent-coef is silently
+        # ignored on resume unless it is reapplied here. Stage 2 ended at
+        # entropy_loss -0.08 (near-deterministic), so the skill-5 finetune needs
+        # this lever to actually move or the raised value is a lie in summary.json.
+        if args.ent_coef is not None:
+            print(f"ent_coef {model.ent_coef} -> {args.ent_coef} (resume override)")
+            model.ent_coef = args.ent_coef
+        args.ent_coef = model.ent_coef  # so summary.json records what ran
         print("resumed from", args.resume, "at", model.num_timesteps, "steps")
     else:
+        if args.ent_coef is None:
+            args.ent_coef = 0.01
         model = PPO(
             "CnnPolicy", venv, verbose=1, seed=args.seed,
             n_steps=256, batch_size=512, learning_rate=2.5e-4,
