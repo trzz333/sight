@@ -205,14 +205,47 @@ solution that works.
    has little exploration left to adapt at skill 5. The resume-finetune step may
    need entropy re-injection (raise --ent-coef on resume).
 
+### 4b. Stage 3: skill-5 resume-finetune (COMPLETE, PASSED, combat-verified)
+
+Resume the stage-2 shaped weights at skill 5, 1.5M -> 3.0M steps, with
+`--ent-coef 0.05` reapplied after `PPO.load` (the flag was a silent no-op on
+resume before fb7ff99: SB3 restores the checkpoint's saved ent_coef, so the
+override was ignored while still being written into summary.json). The
+re-injection is what section 4a's note 3 predicted would be needed: entropy
+re-climbed from -0.08, giving the near-deterministic policy room to re-adapt.
+Ran under Task Scheduler (`Sight-VZD3-S5`), 13,922s, clean finish rc=0.
+
+**Reward: mean 2199.67 / IQM 2279.67** over 30 deterministic raw episodes
+(`runs/vzd/ppo_deadly_corridor_s5_ft/summary.json`; IQM recomputed from the raw
+rewards array matches stored to the penny). Pre-registered bar: decisively
+above the skill-5 flat collapse IQM 93.6. This policy's own cold start at
+skill 5 was IQM ~93.3, so ~93 -> ~2280 is real transfer, not a warm start.
+29/30 episodes reach the armor at ~2280; 1 death (-115.9).
+
+**Combat probe (2026-07-19, resolves the fight-or-run-past caveat at skill 5):
+FIGHT, HIGH.** `tools/vzd_probe_combat.py` at skill 5, 30 deterministic
+episodes (`combat_probe.json`): **kills_mean 5.83, 30/30 episodes with a kill,
+29/30 full clears at 6/6 kills, 6/6 hits**, damage_taken_mean 58.8, final
+health mean 41.2, 1 death (the same -115.9 episode as the eval; the probe
+reproduces the eval IQM 2279.67 exactly, re-verifying it from independent
+code). The modal clear is 6 kills at skill 5 versus 5 at skill 3 (whether
+that is one more spawn or one fewer escapee is not established and does not
+matter for the verdict). Raw-reward ambiguity closed: the score is combat,
+not a distance artifact. Same metric caveat as 4a: SHOTS_FIRED/accuracy
+contaminated, KILLCOUNT/HITCOUNT/DAMAGE_TAKEN clean. Demo:
+`runs/vzd/demos/corridor_s5_ft.mp4`.
+
+Still owed: seeds. Every decisive number in this doc is n=1. No transfer
+claim goes in the README before at least 2 more seeds of the s3->s5 pipeline.
+
 ## 5. Results table (fill on eval, do not pre-populate)
 
 | Stage | Method | Score (raw scenario, 30-ep deterministic) | Verdict |
 |---|---|---|---|
 | skill-5 flat | PPO CnnPolicy gamma 0.99, no curriculum | mean 130.5 / IQM 93.6, 14/30 identical eps | FAILED, entropy collapse |
 | skill-3 flat | PPO CnnPolicy gamma 0.99, curriculum only | mean 891.1 / IQM 683.9, 15/30 identical eps | FAILED, IQM below the ~767 untrained anchor; entropy collapse |
-| skill-3 shaped+norm | + game-var shaping + VecNormalize returns | mean 2279.1 / IQM 2279.4, 30/30 armor reached | **PASSED**, 3.3x the 683.9 bar; single seed, combat UNKNOWN |
-| skill-5 resume-finetune | resume shaped weights at skill 5 | TBD | not started |
+| skill-3 shaped+norm | + game-var shaping + VecNormalize returns | mean 2279.1 / IQM 2279.4, 30/30 armor reached | **PASSED**, 3.3x the 683.9 bar; combat-verified 5 kills/5 hits every episode, 0 deaths; single seed |
+| skill-5 resume-finetune | resume shaped weights at skill 5, ent-coef 0.05 reapplied | mean 2199.7 / IQM 2279.67, 29/30 armor reached, 1 death | **PASSED**, vs 93.6 flat collapse and ~93.3 own cold start; combat-verified kills_mean 5.83, 30/30 episodes with a kill; single seed |
 
 
 ## 6. FOUND-ART on the failure (verdict ADOPT)
