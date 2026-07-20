@@ -17,8 +17,10 @@ CREATE_NO_WINDOW = 0x08000000
 CREATE_NEW_PROCESS_GROUP = 0x00000200
 
 if __name__ == "__main__":
+    # Pass ALL args through so one-off jobs (probes, evals) can run hidden
+    # without needing a wrapper .cmd. Single-.cmd usage unchanged.
     subprocess.Popen(
-        ["cmd.exe", "/c", sys.argv[1]],
+        ["cmd.exe", "/c"] + sys.argv[1:],
         creationflags=CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP,
         close_fds=True,
     )
