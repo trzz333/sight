@@ -70,6 +70,11 @@ def main() -> int:
     ap.add_argument("--max-restarts", type=int, default=40)
     ap.add_argument("--min-progress", type=int, default=2048,
                     help="abort if a leg advances the checkpoint by less than this")
+    ap.add_argument("--watchdog-sec", type=int, default=1800,
+                    help="kill the leg tree if the newest checkpoint step count "
+                         "does not advance for this many seconds (2026-07-20: a "
+                         "leg wedged at ~0 CPU for 15h with every process alive; "
+                         "poll() alone cannot see a frozen tree)")
     ap.add_argument("rest", nargs=argparse.REMAINDER,
                     help="args after -- are forwarded to vzd_ppo_train.py")
     args = ap.parse_args()
@@ -80,6 +85,19 @@ def main() -> int:
     _SUPLOG = out / "supervisor.log"
     fwd = [a for a in args.rest if a != "--"]
     stall = 0
+
+    # Single-instance lock. The 30-min repetition trigger (sleep self-heal)
+    # must never stack a second supervisor onto a live one.
+    lock = out / "SUP_LOCK"
+    if lock.exists():
+        try:
+            other = int(lock.read_text().strip())
+            os.kill(other, 0)
+            log(f"supervisor {other} already alive per SUP_LOCK; exiting")
+            return 0
+        except (OSError, ValueError):
+            pass  # stale lock
+    lock.write_text(str(os.getpid()), encoding="utf-8")
     log(f"supervisor up, pid {os.getpid()}, target {args.target}")
 
     for leg in range(args.max_restarts + 1):
@@ -102,10 +120,25 @@ def main() -> int:
         proc = subprocess.Popen(cmd, cwd=str(REPO_ROOT))
         # Poll rather than block, so the heartbeat keeps advancing while the leg
         # runs. A stalled heartbeat with no exit line means killed, not crashed.
+        wd_steps, wd_t = done_steps, time.time()
         while proc.poll() is None:
             heartbeat(out, f"leg {leg} pid {proc.pid} alive "
                            f"{time.time() - t0:.0f}s")
+            _, now_steps = newest_ckpt(out)
+            if now_steps > wd_steps:
+                wd_steps, wd_t = now_steps, time.time()
+            elif time.time() - wd_t > args.watchdog_sec:
+                log(f"WATCHDOG: no checkpoint progress in "
+                    f"{args.watchdog_sec}s; killing leg {leg} tree "
+                    f"(pid {proc.pid})")
+                subprocess.run(["taskkill", "/PID", str(proc.pid),
+                                "/T", "/F"], capture_output=True)
+                break
             time.sleep(30)
+        try:
+            proc.wait(timeout=30)  # reap after a watchdog kill
+        except Exception:
+            pass
         rc = proc.returncode
         log(f"leg {leg} exited rc={rc} after {time.time() - t0:.0f}s")
         if rc == 0:
