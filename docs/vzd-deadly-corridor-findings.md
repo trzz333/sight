@@ -235,8 +235,9 @@ not a distance artifact. Same metric caveat as 4a: SHOTS_FIRED/accuracy
 contaminated, KILLCOUNT/HITCOUNT/DAMAGE_TAKEN clean. Demo:
 `runs/vzd/demos/corridor_s5_ft.mp4`.
 
-Still owed: seeds. Every decisive number in this doc is n=1. No transfer
-claim goes in the README before at least 2 more seeds of the s3->s5 pipeline.
+Seeds owed here were delivered: section 9 replicates the full pipeline on two
+more seeds. The README transfer claim is licensed by that replication, not by
+this single run.
 
 ## 5. Results table (fill on eval, do not pre-populate)
 
@@ -244,8 +245,17 @@ claim goes in the README before at least 2 more seeds of the s3->s5 pipeline.
 |---|---|---|---|
 | skill-5 flat | PPO CnnPolicy gamma 0.99, no curriculum | mean 130.5 / IQM 93.6, 14/30 identical eps | FAILED, entropy collapse |
 | skill-3 flat | PPO CnnPolicy gamma 0.99, curriculum only | mean 891.1 / IQM 683.9, 15/30 identical eps | FAILED, IQM below the ~767 untrained anchor; entropy collapse |
-| skill-3 shaped+norm | + game-var shaping + VecNormalize returns | mean 2279.1 / IQM 2279.4, 30/30 armor reached | **PASSED**, 3.3x the 683.9 bar; combat-verified 5 kills/5 hits every episode, 0 deaths; single seed |
-| skill-5 resume-finetune | resume shaped weights at skill 5, ent-coef 0.05 reapplied | mean 2199.7 / IQM 2279.67, 29/30 armor reached, 1 death | **PASSED**, vs 93.6 flat collapse and ~93.3 own cold start; combat-verified kills_mean 5.83, 30/30 episodes with a kill; single seed |
+| skill-3 shaped+norm | + game-var shaping + VecNormalize returns | mean 2279.1 / IQM 2279.4, 30/30 armor reached | **PASSED**, 3.3x the 683.9 bar; combat-verified 5 kills/5 hits every episode, 0 deaths; replicated on 2 more seeds (section 9) |
+| skill-5 resume-finetune | resume shaped weights at skill 5, ent-coef 0.05 reapplied | mean 2199.7 / IQM 2279.67, 29/30 armor reached, 1 death | **PASSED**, vs 93.6 flat collapse and ~93.3 own cold start; combat-verified kills_mean 5.83, 30/30 episodes with a kill; replicated on 2 more seeds (section 9) |
+
+Three-seed ledger for the passing pipeline (raw IQM over 30 deterministic
+episodes; bars 683.9 at skill 3 and 93.6 at skill 5):
+
+| Seed | s3 shaped+norm IQM | s5 finetune IQM | s5 probe (kills/ep, survived) |
+|---|---|---|---|
+| 0 (pilot) | 2279.43 | 2279.67 | FIGHT, 5.83, 29/30 |
+| 1 | 2276.58 | 2280.44 | FIGHT, 5.90, 28/30 |
+| 2 | 2277.95 | 2279.69 | FIGHT, 5.77, 28/30 |
 
 
 ## 6. FOUND-ART on the failure (verdict ADOPT)
@@ -392,3 +402,48 @@ real: run 4 restored VecNormalize stats from the step-matched 500k `.pkl` and
 continued to 1.5M. Without that, a restart re-estimates the return std from 1.0
 and re-inflates the returns whose scale caused the section-3a collapse, so a
 naive restart would undo the fix it exists to protect.
+
+## 9. Two-seed replication: the pipeline reproduces (COMPLETE, VERIFIED)
+
+The section-4 result was n=1. Seeds 1 and 2 re-ran the identical pipeline
+end to end: s3 shaped+norm from scratch to 1.5M, then s5 resume-finetune from
+the numbered 1.5M checkpoint (step-matched VecNormalize pkl, --ent-coef 0.05
+reapplied post-load) to 3.0M. Same recipe string, same raw 30-episode
+deterministic eval, same pre-registered bars (683.9 at s3, 93.6 at s5).
+
+Results, from `summary.json` in each run dir (confidence HIGH, read from disk):
+
+- Seed 1: s3 IQM **2276.58** (mean 2277.36); s5 IQM **2280.44** (mean 2169.60,
+  two deaths pull the mean, IQM robust). s5 combat probe: **FIGHT**, 5.9
+  kills/ep, 30/30 episodes with a kill, 28/30 survived, probe IQM matches the
+  training eval exactly.
+- Seed 2: s3 IQM **2277.95** (mean 2278.30); s3 combat probe **FIGHT**, 5.0
+  kills/ep, 30/30 survived. s5 IQM **2279.69** (mean 2143.88); s5 combat probe
+  **FIGHT**, 5.77 kills/ep, 30/30 episodes with a kill, 28/30 survived.
+- Seed 1's s3 leg has no standalone probe (the auto-probe chain was fixed
+  mid-seed-1; its s5 probe and both seed-2 probes ran under the fixed chain).
+  The seed-2 s3 probe plus the pilot's s3 probe cover that stage on two seeds.
+
+All six passing evals across three seeds land in a 3.9-point band,
+2276.58-2280.44, against bars of 683.9 and 93.6. Every s5 probe says FIGHT
+with 5.7-5.9 kills per episode. The skill-3 -> skill-5 curriculum-transfer
+claim is therefore no longer a single-seed anecdote: **the same recipe, run
+three times from different initializations, produces the same qualitative
+policy (clear the corridor, kill the guards) and the same quantitative score.**
+
+Operational note that matters for reproducibility: seed 2 ran the entire
+two-stage pipeline unattended under Task Scheduler, including the automatic
+stage handoff and both auto-probes, with zero manual intervention. The one
+defect the replication surfaced was infra, not RL: the chained probe cmd
+omitted --env-id, defaulting to defend_the_center whose Discrete(4) action
+space rejects the corridor policy, which crashed the probe half-hourly for
+17h and was also the source of the recurring vizdoom popup windows. One line
+fixed both.
+
+Standing metric caveat carries: SHOTS_FIRED/accuracy in the probe jsons are
+contaminated (stale AMMO2 baseline at reset); KILLCOUNT/HITCOUNT/DAMAGE_TAKEN
+are clean and are the only combat numbers reported.
+
+Portfolio artifact: `runs/vzd/demos/corridor_s5_ft_seed1.mp4`, recorded via
+`tools/vzd_probe_combat.py --record` on the seed-1 s5 model at skill 5,
+deterministic, eval seed 10000 (the same configuration as the verified probe).
