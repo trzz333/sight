@@ -2,6 +2,17 @@
 # visible top-level window, forever, with rotation. When Jeff sees a popup,
 # the offender's pid/path/title/time is already in this log.
 param([string]$Out = "C:\Projects\Sight\runs\vzd\window_watch.log")
+Add-Type -Namespace SightWin -Name Native -MemberDefinition @'
+[DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
+public struct RECT { public int Left, Top, Right, Bottom; }
+'@
+function Get-RectTag([IntPtr]$h) {
+    $r = New-Object SightWin.Native+RECT
+    if ([SightWin.Native]::GetWindowRect($h, [ref]$r)) {
+        return "rect=($($r.Left),$($r.Top))-($($r.Right),$($r.Bottom))"
+    }
+    return "rect=?"
+}
 $seen = @{}
 Get-Process | Where-Object { $_.MainWindowHandle -ne 0 } | ForEach-Object {
     $seen["$($_.Id)"] = $true }
@@ -12,9 +23,10 @@ while ($true) {
     Get-Process | Where-Object { $_.MainWindowHandle -ne 0 } | ForEach-Object {
         if (-not $seen.ContainsKey("$($_.Id)")) {
             $seen["$($_.Id)"] = $true
-            "[{0}] NEW WINDOW pid={1} proc={2} title='{3}' path='{4}'" -f `
+            "[{0}] NEW WINDOW pid={1} proc={2} {3} title='{4}' path='{5}'" -f `
                 (Get-Date -Format 'yyyy-MM-dd HH:mm:ss.fff'), $_.Id,
-                $_.ProcessName, $_.MainWindowTitle, $_.Path |
+                $_.ProcessName, (Get-RectTag $_.MainWindowHandle),
+                $_.MainWindowTitle, $_.Path |
                 Out-File -FilePath $Out -Append -Encoding utf8
         }
     }
