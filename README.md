@@ -1,5 +1,9 @@
 # Sight
 
+![PPO agent clearing ViZDoom deadly_corridor at skill 5: six enemies killed, armor reached](docs/media/corridor_s5_demo.gif)
+
+*A from-scratch PPO policy clearing ViZDoom `deadly_corridor` at max difficulty (skill 5): one full episode, 6 kills, armor reached. Trained on one laptop GPU via a skill-3 curriculum; result replicated on 3 seeds. Details below and in `docs/vzd-deadly-corridor-findings.md`.*
+
 Sight is a local-first reinforcement-learning lab: a hobby and portfolio project for learning modern RL by training small policies, from scratch, on a single older gaming laptop. It is not a product, a startup, or a QA tool. Success is defined by learning progress and reproducible local training, not by users, revenue, or downstream commercial intent.
 
 The environments are **Signal Dodge**, a custom Godot micro-game owned by this repo and exposed as a Gym-style environment (policies are scored against a constant-action baseline of mean episode length 930.27; because that baseline is itself a fixed action, anything that clears it has to actually dodge), and **ViZDoom** (`defend_the_center` and `deadly_corridor`), an approved second target for pixel-based RL. Gymnasium classic-control environments are used alongside them for formal grounding.
