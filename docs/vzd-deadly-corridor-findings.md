@@ -271,7 +271,7 @@ reward scaling normalization VecNormalize".
 
 **FOUND-ART: ADOPT** - this is a textbook, named, documented PPO failure mode,
 and the fix already shipped (VecNormalize return scaling + clip) is the
-canonical published remedy, not a hand-roll. Nothing to build.
+canonical published remedy. Nothing to build.
 
 Prior art (closest first):
 
@@ -285,7 +285,7 @@ Prior art (closest first):
 - **"The 37 Implementation Details of PPO", ICLR Blog Track 2022 + CleanRL**
   [VERIFIED]. Reward scaling via VecNormalize (rewards divided by the std of a
   rolling discounted sum of returns) then clipped to [-10, 10] is *standard
-  documented PPO practice*, not an exotic lever. This is precisely what we
+  documented PPO practice*. This is precisely what we
   shipped. Maturity: it is the reference implementation lineage.
 - **Phasic Policy Gradient, Cobbe et al. 2020 (OpenAI)** [VERIFIED]. Names the
   shared-trunk problem directly: any method jointly optimizing policy and value
@@ -427,18 +427,18 @@ Results, from `summary.json` in each run dir (confidence HIGH, read from disk):
 All six passing evals across three seeds land in a 3.9-point band,
 2276.58-2280.44, against bars of 683.9 and 93.6. Every s5 probe says FIGHT
 with 5.7-5.9 kills per episode. The skill-3 -> skill-5 curriculum-transfer
-claim is therefore no longer a single-seed anecdote: **the same recipe, run
+claim is therefore no longer a single-seed anecdote: the same recipe, run
 three times from different initializations, produces the same qualitative
-policy (clear the corridor, kill the guards) and the same quantitative score.**
+policy (clear the corridor, kill the guards) and the same quantitative score.
 
-Operational note that matters for reproducibility: seed 2 ran the entire
+Operational note: seed 2 ran the entire
 two-stage pipeline unattended under Task Scheduler, including the automatic
 stage handoff and both auto-probes, with zero manual intervention. The one
-defect the replication surfaced was infra, not RL: the chained probe cmd
-omitted --env-id, defaulting to defend_the_center whose Discrete(4) action
+defect the replication surfaced was in the infrastructure: the chained probe
+cmd omitted --env-id, defaulting to defend_the_center whose Discrete(4) action
 space rejects the corridor policy, which crashed the probe half-hourly for
-17h and was also the source of the recurring vizdoom popup windows. One line
-fixed both.
+17h and also caused the recurring vizdoom popup windows; a one-line fix
+closed both.
 
 Standing metric caveat carries: SHOTS_FIRED/accuracy in the probe jsons are
 contaminated (stale AMMO2 baseline at reset); KILLCOUNT/HITCOUNT/DAMAGE_TAKEN
