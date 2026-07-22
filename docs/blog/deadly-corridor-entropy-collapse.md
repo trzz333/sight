@@ -79,9 +79,9 @@ to matter, which is why the two ship together in the runs below.
 ## The pipeline that worked
 
 Stage 1 trains at skill 3 with two changes: VecNormalize return scaling, and
-game-variable reward shaping (per-step deltas paying +200 per hit, -10 per
-point of damage taken, +5 per ammo point, on top of the scenario reward,
-adapted from the published deadly_corridor recipes). Evaluation is deliberately
+game-variable reward shaping (per-step deltas on top of the scenario reward:
++200 per hit landed, -10 per point of damage taken, -5 per round of ammo
+spent, coefficients from the published deadly_corridor recipes). Evaluation is deliberately
 raw (unshaped, unnormalized, at the training skill) so every number stays
 comparable to the failed baselines.
 
