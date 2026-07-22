@@ -31,4 +31,38 @@ The environments are **Signal Dodge**, a custom Godot micro-game owned by this r
 
 **Methods exercised.** Value-based RL (DQN), distributional RL (QR-DQN), NoisyNet exploration, imitation learning (BC), teacher-to-student policy distillation, policy-gradient fine-tuning (PPO), evolutionary strategies (CMA-ES, CMA-MAE), offline RL, from-scratch PPO from pixels (CNN), and a self-supervised next-state-prediction track. Logging is structured NDJSON with deterministic seeds; evaluation tracks reward, episode length, action distribution, and a failure taxonomy. Full run stories live in `docs/` (start with `docs/vzd-ppo-teacher-findings.md` and `docs/sd-fast-curriculum-findings.md`).
 
+## Reproduce this result
+
+The headline result is the deadly_corridor curriculum pipeline. Published numbers came from an MSI Raider 18 HX laptop (RTX 4080 Laptop 12 GB, 64 GB RAM) on Windows 11, at 109-118 env-steps/s with 8 parallel envs: about 2.5 h for stage 1 and 3.8 h for stage 2. Versions: Python 3.14.6, vizdoom 1.3.0, stable_baselines3 2.8.0, gymnasium 1.2.3, torch 2.13.0+cu126.
+
+```powershell
+# 0. Environment (from the repo root)
+py -3.14 -m venv .venv-c1
+.venv-c1\Scripts\python.exe -m pip install vizdoom==1.3.0 stable_baselines3==2.8.0 gymnasium==1.2.3
+.venv-c1\Scripts\python.exe -m pip install torch --index-url https://download.pytorch.org/whl/cu126
+
+# 1. Stage 1: skill 3, game-variable reward shaping + VecNormalize return scaling
+.venv-c1\Scripts\python.exe tools\vzd_ppo_train.py --env-id VizdoomDeadlyCorridor-v1 ^
+  --doom-skill 3 --shape-reward --norm-reward --steps 1500000 --seed 0 ^
+  --out runs\vzd\ppo_deadly_corridor_s3_shaped
+
+# 2. Stage 2: skill-5 finetune, resumed from the NUMBERED 1.5M checkpoint
+#    (the numbered .zip pairs with its step-matched VecNormalize .pkl; model.zip does not).
+#    --steps is ADDITIONAL steps on resume (1.5M -> 3.0M total).
+#    --ent-coef 0.05 must be passed: PPO.load silently restores the checkpoint's value otherwise.
+.venv-c1\Scripts\python.exe tools\vzd_ppo_train.py --env-id VizdoomDeadlyCorridor-v1 ^
+  --doom-skill 5 --shape-reward --norm-reward --ent-coef 0.05 --steps 1500000 ^
+  --resume runs\vzd\ppo_deadly_corridor_s3_shaped\ppo_deadly_corridor_1500000_steps.zip ^
+  --out runs\vzd\ppo_deadly_corridor_s5_ft
+
+# 3. Combat probe: engine-counter verification that the policy fights
+.venv-c1\Scripts\python.exe tools\vzd_probe_combat.py ^
+  --model runs\vzd\ppo_deadly_corridor_s5_ft\model.zip ^
+  --env-id VizdoomDeadlyCorridor-v1 --doom-skill 5
+```
+
+Expected numbers. Each stage ends with a 30-episode deterministic eval on raw scenario reward (unshaped, unnormalized), written to `summary.json` in the run dir. Stage 1 should land at IQM 2276-2280 (three seeds produced 2279.43, 2276.58, 2277.95; the flat-reward bar it must beat is 683.9). Stage 2 should land at IQM 2279-2281 (seeds: 2279.67, 2280.44, 2279.69; the no-curriculum collapse bar is 93.6). The probe should report roughly 5.8-5.9 kills per episode with 28-30 of 30 episodes surviving; read KILLCOUNT / HITCOUNT / DAMAGE_TAKEN and ignore SHOTS_FIRED and accuracy, which are contaminated by a stale ammo baseline at reset. GPU training is not bit-reproducible across drivers, so expect the band rather than exact floats; the three published seeds span under 4 points on a 2280-point scale.
+
+The defend_the_center teacher reproduces with the same script and defaults: `tools\vzd_ppo_train.py --steps 2250000` (the published run totaled 2.25M steps), expected mean ~12 kills per episode over 30 deterministic eval episodes against a 15-kill scenario ceiling.
+
 The project is solo and single-voice: one author makes the engineering calls, with an evidence-anchored self-audit (verify every load-bearing claim against on-disk artifacts and re-run the evals) standing in for external review. See `docs/sight-charter.md` for scope, phase gates, success criteria, and decision authority, and `docs/sight-handoff.md` for live status.
